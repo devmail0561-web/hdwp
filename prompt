@@ -1,0 +1,463 @@
+Tu es un expert en architecture logicielle et en cybersécurité offensive.
+Tu dois produire un Software Architecture Document (SAD) complet, rigoureux
+et générique pour un moteur de test de sécurité web appelé PDWST Engine
+(Property-Driven Web Security Testing Engine).
+
+═══════════════════════════════════════════════════════════
+IDENTITÉ DU SYSTÈME
+═══════════════════════════════════════════════════════════
+
+Nom           : PDWST Engine
+Paradigme     : Property-Driven Security Testing
+Version SAD   : 2.0.0
+Langue        : Français
+Audience      : Architectes logiciels, ingénieurs sécurité,
+                contributeurs open-source, évaluateurs académiques
+
+═══════════════════════════════════════════════════════════
+PHILOSOPHIE FONDAMENTALE — À RESPECTER IMPÉRATIVEMENT
+═══════════════════════════════════════════════════════════
+
+Le PDWST Engine N'EST PAS un scanner de vulnérabilités.
+Il N'EST PAS un outil à base de signatures, de payloads, ou de listes.
+
+Le PDWST Engine est un moteur de falsification de propriétés de sécurité.
+
+Son cycle de raisonnement fondamental est :
+
+  OBSERVE → MODEL → INFER PROPERTIES → HYPOTHESIZE →
+  SELECT MINIMAL EXPERIMENT → EXECUTE → ORACLE →
+  [violated → EVIDENCE + FINDING]
+  [holds    → REFINE MODEL → new hypotheses]
+
+La question centrale n'est pas :
+  "Quelle vulnérabilité puis-je tester sur cet endpoint ?"
+
+La question centrale est :
+  "Quelles propriétés de sécurité devraient être vraies
+   dans cette application, et puis-je construire une
+   expérience minimale qui démontre qu'une de ces
+   propriétés est fausse ?"
+
+Les catégories OWASP/CWE sont des classifications de violations
+découvertes a posteriori, jamais des points de départ du raisonnement.
+
+═══════════════════════════════════════════════════════════
+GÉNÉRICITÉ — CONTRAINTE ABSOLUE
+═══════════════════════════════════════════════════════════
+
+Le SAD doit être totalement générique. Il ne doit contenir aucune
+référence à une application cible réelle, à un nom de domaine, à un
+cas d'usage métier spécifique. Les exemples sont autorisés uniquement
+sous forme de variables abstraites ou de pseudo-applications anonymes.
+
+Correct   → "Un utilisateur U ne peut accéder qu'aux objets
+             dont il est le propriétaire."
+Incorrect → "Un utilisateur ne peut voir que ses propres commandes
+             sur la boutique e-commerce cible."
+
+═══════════════════════════════════════════════════════════
+ARCHITECTURE À DOCUMENTER
+═══════════════════════════════════════════════════════════
+
+Le SAD doit décrire les composants suivants. Pour chacun, produis :
+  - Responsabilité précise
+  - Sous-modules (nommés, avec rôle)
+  - Interfaces TypeScript ou Python (selon pertinence)
+  - Contraintes et invariants
+  - Événements publiés sur le Bus
+
+──────────────────────────────────────────────────────────
+COMPOSANT 1 — Observation Engine
+──────────────────────────────────────────────────────────
+Capture passive (proxy MITM) et active (crawl dirigé) du trafic
+HTTP/HTTPS, WebSocket, GraphQL.
+Normalise chaque observation en RawObservation typée.
+Sous-modules : ProxyCapture, ActiveCrawler, JSExtractor,
+DOMAnalyzer, HeaderInspector, GraphQLIntrospector, WebSocketCapture.
+Contrainte : toute requête active passe par le ScopeGuard.
+Contrainte : les credentials sont masqués dans les logs.
+
+──────────────────────────────────────────────────────────
+COMPOSANT 2 — Application Model
+──────────────────────────────────────────────────────────
+Graphe comportemental structuré inféré depuis les observations.
+Représente l'application telle qu'elle se comporte, pas telle
+qu'elle est documentée.
+Nœuds : EndpointNode, ParameterNode, DataObjectNode, RoleNode,
+         RelationNode, StateNode.
+Mis à jour incrémentalement à chaque nouvelle observation.
+Publication : ModelUpdatedEvent à chaque delta significatif.
+
+──────────────────────────────────────────────────────────
+COMPOSANT 3 — State Machine Learner
+──────────────────────────────────────────────────────────
+Inférence des machines à états finis (FSM) qui gouvernent les flux
+applicatifs (auth, checkout, multi-step forms, role transitions).
+Algorithme : variante de L* appliquée aux séquences
+(endpoint, méthode, statut, session_state).
+La FSM alimente directement le Security Property Engine.
+
+──────────────────────────────────────────────────────────
+COMPOSANT 4 — Security Property Engine  [CENTRAL — NOUVEAU]
+──────────────────────────────────────────────────────────
+Composant central qui inère, depuis le modèle et la FSM, les
+propriétés de sécurité qui devraient être vraies dans l'application.
+
+Les propriétés à inférer sont de 7 types :
+
+  TYPE 1 — Propriété d'autorisation
+    Définition : tout accès à une ressource R par un sujet S
+    est conditionné par une politique P(S, R) = true.
+    Schéma : access(S, R) ⟹ authorized(S, R, policy)
+
+  TYPE 2 — Propriété d'état
+    Définition : l'état Sn n'est atteignable que si tous les
+    états prédécesseurs dans la FSM ont été atteints dans
+    l'ordre défini.
+    Schéma : reachable(Sn) ⟹ ∀ Si ∈ predecessors(Sn), visited(Si)
+
+  TYPE 3 — Propriété d'intégrité
+    Définition : toute opération O annulée ou rejetée ne doit
+    pas produire un état final considéré comme validé.
+    Schéma : cancelled(O) ⟹ ¬committed(state(O))
+
+  TYPE 4 — Propriété de confidentialité
+    Définition : une identité A ne peut pas provoquer la
+    révélation d'une donnée appartenant à une identité B ≠ A.
+    Schéma : query(A, resource) ⟹ owner(resource) = A
+
+  TYPE 5 — Propriété de cohérence
+    Définition : une même action métier exécutée n fois
+    de manière idempotente produit le même état final.
+    Schéma : ∀ n, execute(action, n) → state = execute(action, 1)
+
+  TYPE 6 — Propriété temporelle
+    Définition : après l'expiration d'un token ou d'une session,
+    toute action protégée doit être refusée.
+    Schéma : expired(token) ⟹ ∀ protected_action, denied(action)
+
+  TYPE 7 — Propriété de concurrence
+    Définition : l'exécution simultanée de N requêtes sur une
+    ressource critique préserve les invariants métier.
+    Schéma : concurrent(R1..Rn) ⟹ invariant(state_final)
+
+Pour chaque propriété inférée, le composant produit :
+  - Un identifiant PROP-XXXX
+  - Le type (1 à 7)
+  - La formalisation logique
+  - Les nœuds du modèle impliqués
+  - Le score de confiance de l'inférence (0.0 → 1.0)
+  - Les observations qui ont conduit à cette inférence
+
+──────────────────────────────────────────────────────────
+COMPOSANT 5 — Hypothesis Engine
+──────────────────────────────────────────────────────────
+Reçoit les propriétés du Security Property Engine.
+Pour chaque propriété P, génère les hypothèses de falsification H :
+  "Il existe une expérience E telle que P soit violée."
+
+Chaque hypothèse contient :
+  - La propriété cible (PROP-ID)
+  - L'énoncé falsifiable
+  - La priorité (calculée sur impact métier × probabilité × couverture)
+  - Les expériences requises (ExperimentSpec[])
+  - Le statut (PENDING | CONFIRMED | REFUTED | INSUFFICIENT_DATA)
+
+Priorisation :
+  priorité = f(impact_violation, surface_exposée, qualité_observations)
+
+──────────────────────────────────────────────────────────
+COMPOSANT 6 — Experiment Engine
+──────────────────────────────────────────────────────────
+Traduit les ExperimentSpec en requêtes HTTP réelles, minimales,
+justifiées uniquement par l'hypothèse active.
+
+Sous-modules :
+
+  MutationModule
+    Génère des variantes contrôlées selon des axes de mutation :
+    identity_swap, object_ref_change, privilege_escalation,
+    value_boundary, type_confusion, field_injection.
+    Principe : ne génère QUE les mutations nécessaires à tester
+    la propriété visée, jamais toutes les mutations possibles.
+
+  TemporalModule
+    Gère les expériences nécessitant la concurrence ou le timing :
+    race_condition, toctou, token_reuse, session_fixation.
+    Paramètres : concurrency (int), delay_ms (int), ordering.
+
+Sortie : ExperimentResult avec request_sent, response_received,
+timing_ms, hypothesis_id, replayed_from (si replay).
+
+──────────────────────────────────────────────────────────
+COMPOSANT 7 — Semantic Oracle
+──────────────────────────────────────────────────────────
+(Anciennement "Evidence Engine" + "Semantic Diff Engine")
+
+Compare les réponses non pas sur leur égalité brute mais sur leur
+signification comportementale, en référence à la propriété testée.
+
+Semantic Diff :
+  - structural_difference : schémas JSON différents
+  - behavioral_difference : même schéma, sémantique différente
+  - leaked_fields         : champs non attendus dans la réponse
+  - status_difference     : codes HTTP différents
+  - body_similarity       : Jaccard sur les clés JSON
+  - verdict               : SIGNIFICANT | INSIGNIFICANT | AMBIGUOUS
+
+Confidence Model (multi-dimensionnel) :
+  {
+    "oracle_strength"         : 0.0 → 1.0,
+    "reproducibility"         : 0.0 → 1.0,
+    "observation_quality"     : 0.0 → 1.0,
+    "behavioral_specificity"  : 0.0 → 1.0,
+    "experiment_coverage"     : 0.0 → 1.0,
+    "overall_confidence"      : 0.0 → 1.0
+  }
+
+  overall_confidence = w1×oracle_strength + w2×reproducibility
+                     + w3×observation_quality
+                     + w4×behavioral_specificity
+                     + w5×experiment_coverage
+
+Seuils de statut :
+  overall_confidence ≥ 0.85 → CONFIRMED
+  toutes expériences INSIGNIFICANT → REFUTED
+  sinon → INSUFFICIENT_DATA (→ nouvelles ExperimentSpec générées)
+
+Finding (si CONFIRMED) :
+  - id, hypothesis_id, property_id
+  - violated_property (énoncé formel)
+  - owasp_category, cwe_id (classification a posteriori)
+  - severity, affected_endpoints
+  - confidence_breakdown (l'objet multi-dimensionnel complet)
+  - proof : { observations[], experiments[], diffs[],
+              reproduction_steps[], har_export_path }
+  - remediation_hint
+
+──────────────────────────────────────────────────────────
+COMPOSANT 8 — Context Loader & ScopeGuard
+──────────────────────────────────────────────────────────
+Seule source de vérité sur ce que le moteur est autorisé à faire.
+Charge un fichier de contexte YAML générique incluant :
+  - target.base_url (et domaines associés)
+  - scope.include / scope.exclude (patterns glob)
+  - threat_model.focus (liste de types de propriétés)
+  - roles (avec credentials chargés depuis ENV, jamais en clair)
+  - options : allow_write, max_requests_per_minute, language
+
+ScopeGuard : non débrayable au runtime. Bloque toute requête
+hors scope ou destructive sans flag --allow-write.
+Toute requête bloquée est loggée avec raison et timestamp.
+
+──────────────────────────────────────────────────────────
+COMPOSANT 9 — LLM Interpretive Layer (optionnel)
+──────────────────────────────────────────────────────────
+Intervient uniquement pour :
+  1. Désambiguïser un SemanticDiff au verdict AMBIGUOUS
+  2. Proposer des propriétés complémentaires non inférées par les règles
+  3. Interpréter du JavaScript obfusqué
+  4. Générer les remediation_hints
+  5. Générer le résumé exécutif du rapport
+
+Contrainte absolue : le LLM NE PEUT PAS statuer CONFIRMED.
+Toute output LLM est taguée source: "llm", distinguée des preuves
+empiriques, et jamais utilisée comme preuve dans le Finding.
+
+──────────────────────────────────────────────────────────
+COMPOSANT 10 — Report Engine
+──────────────────────────────────────────────────────────
+Agrège les Findings confirmés.
+Formats : report.md, findings.json, evidence/*.har, summary.json.
+Chaque Finding inclut la chaîne complète :
+  FIND → HYP → PROP → EXP → OBS
+Le rapport expose, pour chaque violation, la propriété formelle
+violée avant la classification OWASP/CWE.
+
+──────────────────────────────────────────────────────────
+SYSTÈME DE PLUGINS
+──────────────────────────────────────────────────────────
+Un plugin implémente HDWPPlugin et peut contribuer à :
+  - L'inférence de propriétés (inferProperties(model) → Property[])
+  - La génération d'hypothèses (generateHypotheses(model) → Hypothesis[])
+  - Un oracle sémantique custom (semanticOracle(diff) → Verdict)
+
+Les plugins sont classés par type de propriété, PAS par vulnérabilité :
+  authorization-property-plugin
+  state-transition-property-plugin
+  information-flow-property-plugin
+  business-invariant-property-plugin
+  session-property-plugin
+  temporal-property-plugin
+  concurrency-property-plugin
+
+Contraintes du contrat plugin (identiques à v1) :
+  - Jamais de requête réseau directe
+  - Jamais d'écriture dans le modèle
+  - Jamais de verdict sur une hypothèse
+  - inferProperties() ≤ 5 secondes
+
+═══════════════════════════════════════════════════════════
+BOUCLE D'APPRENTISSAGE CONTINUE
+═══════════════════════════════════════════════════════════
+
+Le SAD doit formaliser la boucle d'apprentissage suivante
+et expliquer comment chaque composant y contribue :
+
+  OBSERVE
+    ↓
+  MODEL (mise à jour incrémentale)
+    ↓
+  INFER PROPERTIES (Security Property Engine)
+    ↓
+  GENERATE HYPOTHESES (Hypothesis Engine)
+    ↓
+  SELECT MINIMAL EXPERIMENT (Experiment Engine)
+    ↓
+  EXECUTE
+    ↓
+  SEMANTIC ORACLE
+    ↓
+  [violated] → EVIDENCE → FINDING
+  [holds]    → REFINE MODEL → nouvelles propriétés / nouvelles hypothèses
+
+Le système apprend pendant la campagne.
+Les résultats d'expériences qui ne confirment pas une hypothèse
+doivent enrichir le modèle, pas simplement être ignorés.
+
+═══════════════════════════════════════════════════════════
+COMMUNICATION ENTRE COMPOSANTS
+═══════════════════════════════════════════════════════════
+
+Architecture Event Bus asynchrone (publish/subscribe).
+Aucun composant n'importe un autre composant.
+Documenter la HDWPEventMap complète :
+  observation.raw           → RawObservation
+  model.updated             → ApplicationModel delta
+  fsm.updated               → ApplicationFSM
+  property.inferred         → SecurityProperty
+  property.invalidated      → { id, reason }
+  hypothesis.generated      → Hypothesis
+  hypothesis.status_changed → { id, old_status, new_status }
+  experiment.result         → ExperimentResult
+  diff.computed             → SemanticDiff
+  finding.confirmed         → Finding
+  finding.refuted           → Finding
+  report.generated          → { path, summary }
+
+═══════════════════════════════════════════════════════════
+STRUCTURE DU SAD À PRODUIRE
+═══════════════════════════════════════════════════════════
+
+Produire les sections suivantes, dans cet ordre :
+
+  1. Introduction
+     1.1 Objet du document
+     1.2 Problème adressé (limites des scanners traditionnels)
+     1.3 Paradigme retenu (Property-Driven Security Testing)
+     1.4 Cycle fondamental (schéma ASCII)
+     1.5 Périmètre technique (protocoles, auth types, hors-périmètre)
+
+  2. Objectifs et contraintes architecturales
+     2.1 Attributs de qualité (tableau)
+     2.2 Contraintes (LLM optionnel, ScopeGuard, credentials,
+         payloads destructifs)
+
+  3. Vue d'ensemble de l'architecture
+     3.1 Diagramme de haut niveau (schéma ASCII complet)
+     3.2 Principes de communication (Event Bus)
+     3.3 La boucle d'apprentissage continue
+
+  4. Composants du noyau (sections 4.1 à 4.10)
+     Chaque composant : responsabilité, sous-modules,
+     interfaces, contraintes, événements
+
+  5. Security Property Engine — détail approfondi
+     5.1 Taxonomie des 7 types de propriétés
+     5.2 Algorithme d'inférence
+     5.3 Formalisation logique de chaque type
+     5.4 Structure d'une SecurityProperty
+     5.5 Relation propriété → hypothèse
+
+  6. Système de plugins
+     6.1 Plugin Contract (interface complète)
+     6.2 Plugin Registry
+     6.3 Plugins natifs (classés par type de propriété)
+
+  7. Flux de données
+     7.1 Flux principal (mode actif complet)
+     7.2 Flux passif uniquement
+     7.3 Flux de raffinement (holds → refine)
+
+  8. Modèles de données
+     8.1 Evidence Store (structure des répertoires)
+     8.2 IDs et traçabilité (tableau des préfixes)
+     8.3 Chaîne de preuve complète FIND → HYP → PROP → EXP → OBS
+
+  9. Interfaces entre composants
+     9.1 HDWPEventMap complète
+     9.2 API CLI
+
+  10. Couche LLM
+      10.1 Positionnement (rôle strictement interprétatif)
+      10.2 Contraintes
+      10.3 Interface LLMLayer
+
+  11. Sécurité interne et éthique opérationnelle
+      11.1 ScopeGuard
+      11.2 Gestion des credentials
+      11.3 Rate limiting (TokenBucket)
+      11.4 Flag allow_write
+
+  12. Stack technique (tableau)
+
+  13. Structure des répertoires
+
+  14. Décisions architecturales (ADR)
+      ADR-001 Event Bus plutôt qu'appels directs
+      ADR-002 LLM non-décisionnel
+      ADR-003 Plugin = package installable
+      ADR-004 SQLite par défaut / PostgreSQL en option
+      ADR-005 ScopeGuard non-débrayable au runtime
+      ADR-006 Propriétés comme primitives de premier ordre
+               (justifier pourquoi les vulnérabilités OWASP
+                sont des classifications a posteriori, pas
+                des points de départ)
+      ADR-007 Confidence multi-dimensionnelle
+               (justifier l'objet à 5 dimensions vs scalaire)
+
+═══════════════════════════════════════════════════════════
+CONTRAINTES DE RÉDACTION
+═══════════════════════════════════════════════════════════
+
+- Langue : français, technique, précis
+- Interfaces : TypeScript pour les schémas de données,
+  Python pour les modules d'implémentation
+- Schémas ASCII pour tous les diagrammes (pas de Mermaid,
+  pas d'images)
+- Chaque interface doit être accompagnée d'un commentaire
+  explicatif en ligne
+- Les exemples dans les interfaces sont génériques
+  (pas de valeurs liées à un domaine métier réel)
+- Ton document doit être auto-suffisant : un ingénieur
+  qui ne connaît pas le projet doit pouvoir implémenter
+  le moteur depuis ce seul document
+
+═══════════════════════════════════════════════════════════
+CE QUE LE SAD NE DOIT PAS FAIRE
+═══════════════════════════════════════════════════════════
+
+✗ Ne pas lister des payloads ou des signatures
+✗ Ne pas faire référence à une cible réelle
+✗ Ne pas positionner le LLM comme décisionnel
+✗ Ne pas permettre de confirmer une vulnérabilité sans
+  preuve empirique reproductible
+✗ Ne pas classer les plugins par nom de vulnérabilité
+  (ex: "plugin-sqli") mais par type de propriété
+✗ Ne pas omettre la boucle de raffinement (holds → refine)
+✗ Ne pas réduire la confiance à un scalaire unique
+
+═══════════════════════════════════════════════════════════
+GÉNÈRE MAINTENANT LE SAD COMPLET.
+═══════════════════════════════════════════════════════════

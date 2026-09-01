@@ -1,0 +1,120 @@
+# Copyright (c) 2026 M. TENDENG
+# Licensed under the MIT License. See LICENSE file for details.
+
+from __future__ import annotations
+
+import importlib.metadata
+import importlib.util
+import sys
+
+import structlog
+
+from hdwp.plugins.base import HDWPPlugin
+
+logger = structlog.get_logger()
+
+
+class PluginRegistry:
+    """Discovers and manages HDWP plugins."""
+
+    def __init__(self) -> None:
+        self._plugins: dict[str, HDWPPlugin] = {}
+        self._enabled: set[str] = set()
+
+    def discover(self) -> None:
+        """Discover plugins via importlib entry_points and ~/.hdwp/plugins/."""
+        self._discover_entry_points()
+        self._discover_user_plugins()
+
+    def _discover_entry_points(self) -> None:
+        """Discover plugins via importlib entry_points."""
+        try:
+            eps = importlib.metadata.entry_points(group="hdwp.plugins")
+            for ep in eps:
+                try:
+                    plugin_class = ep.load()
+                    plugin = plugin_class()
+                    self._plugins[plugin.id] = plugin
+                    logger.debug("plugin.discovered", plugin_id=plugin.id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "plugin.load_failed", entry_point=ep.name, error=str(exc)
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("plugin.discovery_failed", error=str(exc))
+
+    def _discover_user_plugins(self) -> None:
+        """Discover plugins from ~/.hdwp/plugins/ directory."""
+        from hdwp.core.paths import PLUGINS_DIR
+
+        if not PLUGINS_DIR.exists():
+            return
+
+        for plugin_subdir in PLUGINS_DIR.iterdir():
+            if not plugin_subdir.is_dir():
+                continue
+            plugin_file = plugin_subdir / "hdwp_plugin.py"
+            if not plugin_file.exists():
+                continue
+            try:
+                # Add plugin dir to sys.path temporarily
+                sys.path.insert(0, str(plugin_subdir))
+                try:
+                    spec = importlib.util.spec_from_file_location(
+                        "hdwp_plugin", plugin_file
+                    )
+                    if spec is None or spec.loader is None:
+                        continue
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    plugin_class = getattr(module, "PLUGIN_CLASS", None)
+                    if plugin_class is None:
+                        continue
+                    plugin = plugin_class()
+                    self._plugins[plugin.id] = plugin
+                    logger.debug(
+                        "plugin.user_discovered",
+                        plugin_id=plugin.id,
+                        path=str(plugin_file),
+                    )
+                finally:
+                    # Remove from sys.path
+                    if str(plugin_subdir) in sys.path:
+                        sys.path.remove(str(plugin_subdir))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "plugin.user_load_failed",
+                    path=str(plugin_file),
+                    error=str(exc),
+                )
+
+    def register(self, plugin: HDWPPlugin) -> None:
+        self._plugins[plugin.id] = plugin
+
+    def unregister(self, plugin_id: str) -> None:
+        self._plugins.pop(plugin_id, None)
+        self._enabled.discard(plugin_id)
+
+    def enable(self, plugin_id: str) -> bool:
+        if plugin_id in self._plugins:
+            self._enabled.add(plugin_id)
+            return True
+        return False
+
+    def disable(self, plugin_id: str) -> None:
+        self._enabled.discard(plugin_id)
+
+    def get(self, plugin_id: str) -> HDWPPlugin | None:
+        return self._plugins.get(plugin_id)
+
+    def list_all(self) -> list[HDWPPlugin]:
+        return list(self._plugins.values())
+
+    def list_enabled(self) -> list[HDWPPlugin]:
+        return [p for pid, p in self._plugins.items() if pid in self._enabled]
+
+    def get_by_category(self, category: str) -> list[HDWPPlugin]:
+        return [p for p in self._plugins.values() if p.category == category]
+
+    def is_enabled(self, plugin_id: str) -> bool:
+        return plugin_id in self._enabled

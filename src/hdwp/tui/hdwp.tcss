@@ -1,0 +1,250 @@
+/* HDWP Engine -- hacker terminal theme (neon sur fond noir) */
+
+Screen {
+    background: #080808;
+}
+
+/* -- TargetScreen -- */
+#target-logo {
+    color: #00ff41;
+    text-style: bold;
+    height: 7;
+    content-align: center middle;
+    background: #0a0a0a;
+    border-bottom: solid #1a3a1a;
+}
+
+#url-label, #cred-label, #yaml-label {
+    color: #00ff41;
+    text-style: bold;
+}
+
+#url-input {
+    width: 100%;
+    border: tall #1a3a1a;
+    background: #0d0d0d;
+    color: #d8d8e8;
+}
+
+#mode-radio {
+    background: #0d0d0d;
+    color: #d8d8e8;
+}
+
+#yaml-container {
+    height: auto;
+}
+
+#manual-container {
+    height: auto;
+}
+
+#target-buttons {
+    height: auto;
+    margin-top: 1;
+}
+
+/* -- ScanScreen -- */
+#scan-panels {
+    height: 1fr;
+    min-height: 10;
+}
+
+#left-panels {
+    width: 40;
+}
+
+#right-panels {
+    width: 1fr;
+}
+
+StatusPanel {
+    width: 100%;
+    border: solid #1a3a1a;
+    color: #00ff41;
+    padding: 0 1;
+    background: #050d05;
+}
+
+StatusPanel Label {
+    color: #00cc33;
+}
+
+#status-label {
+    color: #00ff41;
+    text-style: bold;
+}
+
+#proxy-label {
+    color: #445566;
+}
+
+#target-label {
+    color: #d8d8e8;
+}
+
+#crawl-bar {
+    width: 30;
+}
+
+#crawl-bar .bar--bar {
+    background: #00d4ff;
+}
+
+#props-bar .bar--bar {
+    background: #cc44ff;
+}
+
+#experiments-bar .bar--bar {
+    background: #ff6b35;
+}
+
+#hyp-label {
+    color: #4488ff;
+}
+
+#exp-label {
+    color: #ff6b35;
+}
+
+EventLogPanel {
+    width: 1fr;
+    border: solid #1a1a3a;
+    color: #00bfff;
+    background: #05050d;
+}
+
+FindingsTable {
+    height: 12;
+    border: solid #3a1a1a;
+    background: #0d0505;
+}
+
+FindingsTable .datatable--header {
+    color: #888888;
+    background: #1a0a0a;
+}
+
+FindingsTable .datatable--cursor {
+    background: #2a1a1a;
+}
+
+.new-finding {
+    background: #2a0a00;
+    text-style: bold;
+}
+
+/* -- FindingsScreen -- */
+#findings-layout {
+    height: 1fr;
+}
+
+#findings-list-panel {
+    width: 1fr;
+    border: solid #1a3a1a;
+    background: #050505;
+}
+
+#findings-detail-panel {
+    width: 1fr;
+    border: solid #1a3a1a;
+    background: #050505;
+    padding: 1;
+}
+
+#findings-detail {
+    color: #d8d8e8;
+}
+
+/* -- ReportScreen -- */
+#report-container {
+    padding: 2;
+}
+
+#report-title {
+    color: #00ff41;
+    text-style: bold;
+    height: 2;
+}
+
+#format-label, #file-label, #llm-label {
+    color: #00ff41;
+    text-style: bold;
+}
+
+#file-input {
+    width: 100%;
+    border: tall #1a3a1a;
+    background: #0d0d0d;
+    color: #d8d8e8;
+}
+
+#format-radio, #llm-radio {
+    background: #0d0d0d;
+    color: #d8d8e8;
+}
+
+#report-buttons {
+    height: auto;
+    margin-top: 1;
+}
+
+/* -- SettingsScreen -- */
+#settings-tabs {
+    height: 1fr;
+}
+
+/* -- TokensScreen -- */
+#tokens-container {
+    padding: 2;
+}
+
+#tokens-title {
+    color: #ffd700;
+    text-style: bold;
+    height: 2;
+}
+
+#role-label, #type-label, #token-label {
+    color: #ffd700;
+    text-style: bold;
+}
+
+#role-input, #token-input {
+    width: 100%;
+    border: tall #3a3a1a;
+    background: #0d0d0d;
+    color: #d8d8e8;
+}
+
+#type-radio {
+    background: #0d0d0d;
+    color: #d8d8e8;
+}
+
+#tokens-count {
+    color: #44ff88;
+    height: 1;
+}
+
+#tokens-buttons {
+    height: auto;
+    margin-top: 1;
+}
+
+/* -- Toast notifications -- */
+.toast {
+    background: #2a2000;
+    border: solid #ffd700;
+}
+
+/* -- Footer -- */
+Footer {
+    background: #1a1a1a;
+    color: #555555;
+}
+
+Footer > .footer--highlight {
+    color: #00ff41;
+    background: #1a3a1a;
+}

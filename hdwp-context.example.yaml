@@ -1,0 +1,82 @@
+# HDWP Engine -- Context file example
+# Copy this file and adapt it to your engagement.
+
+target:
+  base_url: "https://target.example.com"
+  name: "Application cible"
+
+scope:
+  include:
+    - "https://target.example.com/*"
+    - "https://api.target.example.com/*"
+  exclude:
+    - "https://target.example.com/logout"
+    - "*.cdn.*"
+
+threat_model:
+  focus:
+    - authorization
+    - confidentiality
+    - state
+    - integrity
+  business_logic: true
+
+roles:
+  - name: "anonymous"
+    credentials: null
+  - name: "user_a"
+    credentials:
+      type: "bearer"
+      token: "${USER_A_TOKEN}"
+  - name: "user_b"
+    credentials:
+      type: "bearer"
+      token: "${USER_B_TOKEN}"
+  - name: "admin"
+    credentials:
+      type: "bearer"
+      token: "${ADMIN_TOKEN}"
+
+options:
+  allow_write: false
+  max_requests_per_minute: 60
+  language: "fr"
+
+plugins:
+  enabled:
+    - "core.authorization.bola"
+    - "core.authorization.authz"
+  disabled: []
+  config: {}
+
+# Configuration LLM optionnelle (ADR-002 : non-décisionnel, jamais décisif seul)
+# La clé API est lue depuis l'environnement — jamais en clair ici.
+# llm:
+#   enabled: false
+#   provider: anthropic          # anthropic | openai | ollama
+#   model: claude-sonnet-4-6     # gpt-4o-mini | llama3.2 | mistral | ...
+#   base_url: null               # pour ollama: http://localhost:11434/v1
+#
+# Exemples par provider :
+#   Anthropic : export ANTHROPIC_API_KEY=sk-ant-...
+#   OpenAI    : export OPENAI_API_KEY=sk-...
+#   Ollama    : aucune clé requise, base_url: http://localhost:11434/v1
+
+# OAuth2 — authentification machine-to-machine ou password grant
+# Les clés sont toujours lues depuis l'environnement (${VAR}).
+# roles:
+#   - name: "service_account"
+#     credentials:
+#       type: oauth2_client_credentials
+#       token_endpoint: "${TOKEN_ENDPOINT}"
+#       client_id: "${CLIENT_ID}"
+#       client_secret: "${CLIENT_SECRET}"
+#       scope: "read write admin"
+#
+#   - name: "user_a"
+#     credentials:
+#       type: oauth2_password
+#       token_endpoint: "${TOKEN_ENDPOINT}"
+#       client_id: "${CLIENT_ID}"
+#       username: "${USER_A_EMAIL}"
+#       password: "${USER_A_PASSWORD}"

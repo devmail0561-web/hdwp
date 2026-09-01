@@ -1,0 +1,26 @@
+target:
+  base_url: "http://localhost:8080"
+  name: "Test Application"
+
+scope:
+  include:
+    - "http://localhost:8080/*"
+  exclude:
+    - "http://localhost:8080/logout"
+
+roles:
+  - name: "anonymous"
+    credentials: null
+  - name: "user_a"
+    credentials:
+      type: "bearer"
+      token: "${TEST_USER_A_TOKEN}"
+
+options:
+  allow_write: false
+  max_requests_per_minute: 60
+  language: "fr"
+
+plugins:
+  enabled:
+    - "core.authorization.bola"

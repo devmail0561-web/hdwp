@@ -1,0 +1,992 @@
+# SAD — HDWP Engine
+## Software Architecture Document
+### Hypothesis-Driven Web Pentesting Engine
+
+**Version :** 1.0.0  
+**Statut :** Draft  
+**Auteur :** Michel Tendeng  
+**Date :** 2026-09-01  
+
+---
+
+## Table des matières
+
+1. [Introduction](#1-introduction)
+2. [Objectifs et contraintes architecturales](#2-objectifs-et-contraintes-architecturales)
+3. [Vue d'ensemble de l'architecture](#3-vue-densemble-de-larchitecture)
+4. [Composants du noyau (Core)](#4-composants-du-noyau-core)
+   - 4.1 Observation Engine
+   - 4.2 State Machine Learner
+   - 4.3 Application Model
+   - 4.4 Context Loader
+   - 4.5 Hypothesis Engine
+   - 4.6 Experiment Engine
+   - 4.7 Evidence Engine
+   - 4.8 Report Engine
+5. [Système de plugins](#5-système-de-plugins)
+   - 5.1 Plugin Contract
+   - 5.2 Plugin Registry
+   - 5.3 Plugins natifs (Core Plugins)
+6. [Flux de données](#6-flux-de-données)
+7. [Modèles de données](#7-modèles-de-données)
+8. [Interfaces entre composants](#8-interfaces-entre-composants)
+9. [Couche LLM](#9-couche-llm)
+10. [Sécurité interne et éthique opérationnelle](#10-sécurité-interne-et-éthique-opérationnelle)
+11. [Stack technique](#11-stack-technique)
+12. [Structure des répertoires](#12-structure-des-répertoires)
+13. [Décisions architecturales (ADR)](#13-décisions-architecturales-adr)
+
+---
+
+## 1. Introduction
+
+### 1.1 Objet du document
+
+Ce document décrit l'architecture logicielle du **HDWP Engine** (Hypothesis-Driven Web Pentesting Engine), un outil de test de sécurité d'applications web reposant sur un paradigme de raisonnement par hypothèses plutôt que sur des signatures ou des listes de payloads.
+
+### 1.2 Problème adressé
+
+Les outils de pentest web existants (ZAP, Nuclei, Burp Suite actif) partagent une architecture fondamentalement identique :
+
+```
+URL → Crawler → Payloads → Signatures → Résultat
+```
+
+Cette approche produit :
+- un volume élevé de faux positifs ;
+- une couverture aveugle de la surface d'attaque ;
+- une incapacité à détecter les vulnérabilités logiques (BOLA, AuthZ, business logic flaws) ;
+- aucune compréhension du comportement applicatif.
+
+### 1.3 Approche retenue
+
+Le HDWP Engine reconstruit d'abord le **modèle comportemental** de l'application (routes, états, rôles, relations entre objets), formule ensuite des **hypothèses de sécurité falsifiables**, génère des **expériences minimales** pour les tester, et ne conclut à une vulnérabilité que sur **preuve empirique reproductible**.
+
+```
+Application → Observation → Modèle → Hypothèse → Expérience → Preuve → Finding
+```
+
+### 1.4 Périmètre
+
+- Applications web HTTP/HTTPS (REST, GraphQL, WebSocket)
+- Authentification : session, JWT, OAuth2, API key
+- Hors périmètre v1.0 : applications mobiles natives, protocoles binaires, fuzzing bas niveau
+
+---
+
+## 2. Objectifs et contraintes architecturales
+
+### 2.1 Objectifs de qualité
+
+| Attribut | Exigence |
+|---|---|
+| **Extensibilité** | Tout nouveau type d'hypothèse s'ajoute via un plugin sans modifier le noyau |
+| **Traçabilité** | Chaque finding référence ses observations, expériences et diffs sources |
+| **Reproductibilité** | Toute expérience est rejouable à partir du seul Evidence Store |
+| **Faible couplage** | Les huit composants communiquent via des interfaces contractuelles, pas par appels directs |
+| **Transparence** | Le LLM n'a aucun pouvoir décisionnel sur la confirmation d'une vulnérabilité |
+
+### 2.2 Contraintes
+
+- Le moteur doit fonctionner **sans LLM** (mode déterministe pur) ; le LLM est un enrichissement facultatif.
+- Toute requête active est soumise au **scope défini dans le Context Loader** ; hors scope = bloqué.
+- Les credentials (tokens, mots de passe) ne transitent jamais dans les logs.
+- Le moteur n'exécute **aucun payload destructif** (pas de DELETE massif, pas d'écriture sur des données réelles sans flag explicite `--allow-write`).
+
+---
+
+## 3. Vue d'ensemble de l'architecture
+
+### 3.1 Diagramme de haut niveau
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        HDWP ENGINE                                  │
+│                                                                     │
+│  ┌──────────────────┐     ┌──────────────────────────────────────┐  │
+│  │  Context Loader  │────▶│           Application Model          │  │
+│  └──────────────────┘     │  (graphe comportemental enrichi)     │  │
+│           ▲               └──────────────┬───────────────────────┘  │
+│           │                              │                           │
+│  ┌────────┴─────────┐                   ▼                           │
+│  │ Observation      │     ┌──────────────────────────────────────┐  │
+│  │ Engine           │────▶│  State Machine Learner               │  │
+│  │ (passif + actif) │     │  (FSM des flux applicatifs)          │  │
+│  └──────────────────┘     └──────────────┬───────────────────────┘  │
+│           ▲                              │                           │
+│           │                             ▼                           │
+│  ┌────────┴─────────┐     ┌──────────────────────────────────────┐  │
+│  │  Plugin System   │────▶│         Hypothesis Engine            │  │
+│  │  (Plugin Registry│     │  (génération + scoring + priorisation│  │
+│  │   + Core Plugins │     └──────────────┬───────────────────────┘  │
+│  │   + Extensions)  │                   │                           │
+│  └──────────────────┘                   ▼                           │
+│                             ┌──────────────────────────────────────┐ │
+│                             │        Experiment Engine             │ │
+│                             │  ┌─────────────┐ ┌───────────────┐  │ │
+│                             │  │  Temporal   │ │   Mutation    │  │ │
+│                             │  │  Module     │ │   Module      │  │ │
+│                             │  └─────────────┘ └───────────────┘  │ │
+│                             └──────────────┬───────────────────────┘ │
+│                                            │                         │
+│                                            ▼                         │
+│                             ┌──────────────────────────────────────┐ │
+│                             │          Evidence Engine             │ │
+│                             │  ┌─────────────┐ ┌───────────────┐  │ │
+│                             │  │  Semantic   │ │  Confidence   │  │ │
+│                             │  │  Diff       │ │  Model        │  │ │
+│                             │  └─────────────┘ └───────────────┘  │ │
+│                             └──────────────┬───────────────────────┘ │
+│                                            │                         │
+│                             ┌──────────────▼───────────────────────┐ │
+│                             │  LLM Interpretive Layer (optionnel)  │ │
+│                             └──────────────┬───────────────────────┘ │
+│                                            │                         │
+│                             ┌──────────────▼───────────────────────┐ │
+│                             │          Report Engine               │ │
+│                             │  (HAR replay + export structuré)     │ │
+│                             └──────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 3.2 Principes de communication
+
+Tous les composants communiquent via un **Event Bus interne** (publish/subscribe). Aucun composant n'appelle directement un autre composant. Chaque composant publie des événements typés et s'abonne aux événements dont il a besoin.
+
+```
+ObservationEngine  → publie  : RawObservationEvent
+StateMachineLearner → publie : FSMUpdateEvent
+ApplicationModel   → publie  : ModelReadyEvent
+HypothesisEngine   → publie  : HypothesisGeneratedEvent
+ExperimentEngine   → publie  : ExperimentResultEvent
+EvidenceEngine     → publie  : FindingEvent | HypothesisRefutedEvent
+ReportEngine       → consomme: FindingEvent → génère rapport
+```
+
+---
+
+## 4. Composants du noyau (Core)
+
+### 4.1 Observation Engine
+
+**Responsabilité :** capturer l'intégralité du trafic HTTP et des artefacts de surface d'attaque, en mode passif (proxy) ou actif (crawler dirigé), et normaliser les observations en `RawObservation`.
+
+**Sous-modules :**
+
+| Sous-module | Rôle |
+|---|---|
+| `ProxyCapture` | Intercepte le trafic via proxy MITM (HTTP/HTTPS) |
+| `ActiveCrawler` | Parcourt les endpoints avec respect du scope |
+| `JSExtractor` | Extrait les routes, les endpoints API et les tokens depuis le JS |
+| `DOMAnalyzer` | Analyse les formulaires, les actions, les inputs |
+| `HeaderInspector` | Inspecte les en-têtes de sécurité, cookies, CSP |
+| `GraphQLIntrospector` | Introspection du schéma GraphQL si disponible |
+| `WebSocketCapture` | Capture les messages WebSocket |
+
+**Sortie publiée :**
+
+```typescript
+interface RawObservation {
+  id: string;                  // OBS-XXXX
+  timestamp: string;           // ISO8601
+  source: "passive" | "active";
+  type: ObservationType;       // HTTP | DOM | JS | COOKIE | HEADER | WS | GRAPHQL
+  request?: NormalizedRequest;
+  response?: NormalizedResponse;
+  artefact?: Record<string, unknown>;
+  session_id: string;
+  tags: string[];
+}
+```
+
+**Contraintes :**
+- Toute requête active passe par le `ScopeGuard` avant émission.
+- Les credentials présents dans les requêtes sont masqués dans les logs (`[REDACTED]`).
+
+---
+
+### 4.2 State Machine Learner
+
+**Responsabilité :** inférer les machines à états finis (FSM) qui gouvernent les flux applicatifs (authentification, panier, workflow de paiement, validation de formulaire multi-étapes) à partir des séquences d'observations.
+
+**Algorithme :**
+
+Le composant utilise un algorithme d'inférence de grammaire régulière (variante simplifiée de L*) appliqué aux séquences `(endpoint, méthode, statut, cookies)` :
+
+1. Chaque séquence de requêtes d'une session devient un mot dans l'alphabet applicatif.
+2. Le learner identifie les états (configurations de session distinctes) et les transitions (requêtes qui changent d'état).
+3. La FSM est mise à jour incrémentalement à chaque nouvelle observation.
+
+**Sortie publiée :**
+
+```typescript
+interface FSMState {
+  id: string;
+  label: string;                     // ex: "authenticated", "cart_non_empty"
+  observable_conditions: string[];   // ce qui permet d'identifier cet état
+}
+
+interface FSMTransition {
+  from: string;
+  to: string;
+  trigger: NormalizedRequest;
+  guard?: string;                    // condition nécessaire à la transition
+}
+
+interface ApplicationFSM {
+  id: string;
+  states: FSMState[];
+  transitions: FSMTransition[];
+  initial_state: string;
+  confidence: number;
+}
+```
+
+**Apport pour les hypothèses :**
+
+La FSM permet au Hypothesis Engine de formuler des hypothèses sur les transitions interdites (ex : "peut-on passer de l'état `anonymous` à l'état `admin_panel` sans passer par `authenticated` ?").
+
+---
+
+### 4.3 Application Model
+
+**Responsabilité :** agréger les observations et la FSM en un **graphe comportemental structuré** qui représente l'application telle qu'elle se comporte — pas telle qu'elle est documentée.
+
+**Structure du graphe :**
+
+```typescript
+interface ApplicationModel {
+  endpoints: EndpointNode[];
+  parameters: ParameterNode[];
+  objects: DataObjectNode[];
+  roles: RoleNode[];
+  relations: Relation[];
+  fsm: ApplicationFSM;
+  technologies: TechStack;
+  last_updated: string;
+}
+
+interface EndpointNode {
+  id: string;
+  path: string;
+  methods: HttpMethod[];
+  auth_required: boolean;
+  roles_observed: string[];
+  parameters: string[];           // IDs des ParameterNode associés
+  returns: string[];              // IDs des DataObjectNode observés
+}
+
+interface ParameterNode {
+  id: string;
+  name: string;
+  location: "query" | "body" | "header" | "path" | "cookie";
+  type_inferred: "integer" | "string" | "uuid" | "boolean" | "object" | "array";
+  affects_object?: string;        // ID du DataObjectNode contrôlé
+  is_user_controlled: boolean;
+}
+
+interface DataObjectNode {
+  id: string;
+  schema: Record<string, string>; // champ → type inféré
+  owner_parameter?: string;       // paramètre qui détermine l'ownership
+  sensitivity: "public" | "private" | "sensitive";
+}
+
+interface RoleNode {
+  id: string;
+  name: string;
+  observed_permissions: string[]; // endpoints accessibles observés
+}
+```
+
+---
+
+### 4.4 Context Loader
+
+**Responsabilité :** charger le contexte de l'engagement avant toute analyse. Il est la seule source de vérité sur ce que l'outil a le droit de faire.
+
+**Entrée (fichier YAML) :**
+
+```yaml
+# hdwp-context.yaml
+target:
+  base_url: "https://target.example.com"
+  name: "Application cible"
+
+scope:
+  include:
+    - "https://target.example.com/*"
+    - "https://api.target.example.com/*"
+  exclude:
+    - "https://target.example.com/logout"
+    - "*.cdn.*"
+
+threat_model:
+  focus:
+    - BOLA
+    - AuthZ
+    - SQLi
+    - XSS
+  owasp_top10: true
+  business_logic: true
+
+roles:
+  - name: "anonymous"
+    credentials: null
+  - name: "user_a"
+    credentials:
+      type: "bearer"
+      token: "${USER_A_TOKEN}"
+  - name: "user_b"
+    credentials:
+      type: "bearer"
+      token: "${USER_B_TOKEN}"
+  - name: "admin"
+    credentials:
+      type: "bearer"
+      token: "${ADMIN_TOKEN}"
+
+stack:
+  - "React"
+  - "Node.js"
+  - "PostgreSQL"
+
+options:
+  allow_write: false
+  max_requests_per_minute: 60
+  language: "fr"
+```
+
+**ScopeGuard :**
+
+Tout composant qui émet une requête active doit passer par le `ScopeGuard.check(url, method)`. Si l'URL est hors scope ou si la méthode est destructive sans `allow_write`, la requête est bloquée et loggée.
+
+---
+
+### 4.5 Hypothesis Engine
+
+**Responsabilité :** analyser le modèle applicatif et générer des hypothèses de sécurité falsifiables, priorisées par risque métier.
+
+**Sources d'hypothèses :**
+
+1. **Plugins natifs** (voir section 5.3) — chaque plugin expose une fonction `generateHypotheses(model: ApplicationModel): Hypothesis[]`
+2. **LLM Layer** (optionnel) — propose des hypothèses complémentaires depuis une lecture du modèle
+3. **Règles structurelles** — ex: tout `ParameterNode` de type `integer` qui `affects_object` génère automatiquement une hypothèse BOLA
+
+**Structure d'une hypothèse :**
+
+```typescript
+interface Hypothesis {
+  id: string;                          // HYP-XXXX
+  status: HypothesisStatus;            // PENDING | CONFIRMED | REFUTED | INSUFFICIENT_DATA
+  source_plugin: string;               // ID du plugin générateur
+  property_tested: string;             // ex: "object-level authorization"
+  statement: string;                   // proposition falsifiable
+  observations_cited: string[];        // IDs des OBS sources
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  priority_rationale: string;
+  required_experiments: ExperimentSpec[];
+  confidence: number;                  // 0.0 → 1.0, calculé par l'Evidence Engine
+}
+```
+
+**Modèle de priorisation :**
+
+La priorité n'est pas calculée sur la facilité d'exploitation mais sur :
+
+```
+priorité = f(impact_métier, probabilité_violation, couverture_observée)
+
+impact_métier     : accès à des données d'autres utilisateurs > accès à admin > fuite d'info
+probabilité       : nombre d'endpoints concernés / total endpoints observés
+couverture        : nombre d'observations supportant l'hypothèse
+```
+
+---
+
+### 4.6 Experiment Engine
+
+**Responsabilité :** traduire les `ExperimentSpec` en requêtes HTTP réelles, les exécuter dans le scope, collecter les résultats bruts.
+
+**Sous-modules :**
+
+#### Mutation Module
+
+Génère des variantes contrôlées d'une requête de référence selon les axes définis par l'hypothèse :
+
+```typescript
+type MutationAxis =
+  | { type: "identity_swap"; from_role: string; to_role: string }
+  | { type: "object_ref_change"; parameter: string; values: unknown[] }
+  | { type: "privilege_escalation"; target_endpoint: string; with_role: string }
+  | { type: "value_boundary"; parameter: string; boundaries: unknown[] }
+  | { type: "type_confusion"; parameter: string; coercions: unknown[] }
+  | { type: "field_injection"; location: "body" | "query"; payload: string };
+```
+
+Le Mutation Module ne génère **que les mutations justifiées par l'hypothèse active**, pas toutes les mutations possibles.
+
+#### Temporal Module
+
+Gère les expériences nécessitant la concurrence ou le timing :
+
+```typescript
+interface TemporalExperiment {
+  type: "race_condition" | "toctou" | "token_reuse" | "session_fixation";
+  concurrency: number;          // nombre de requêtes simultanées
+  delay_ms?: number;            // délai entre deux requêtes séquentielles
+  base_request: NormalizedRequest;
+  variant_request: NormalizedRequest;
+}
+```
+
+**Sortie publiée :**
+
+```typescript
+interface ExperimentResult {
+  id: string;                   // EXP-XXXX
+  hypothesis_id: string;
+  experiment_spec: ExperimentSpec;
+  request_sent: NormalizedRequest;
+  response_received: NormalizedResponse;
+  timing_ms: number;
+  replayed_from?: string;       // ID d'un EXP antérieur si c'est un replay
+  timestamp: string;
+}
+```
+
+---
+
+### 4.7 Evidence Engine
+
+**Responsabilité :** analyser les résultats d'expériences, calculer les scores de confiance, et statuer sur les hypothèses (CONFIRMED / REFUTED / INSUFFICIENT_DATA).
+
+**Sous-modules :**
+
+#### Semantic Diff Engine
+
+Compare deux réponses non pas sur leur égalité brute mais sur leur **signification comportementale** :
+
+```typescript
+interface SemanticDiff {
+  id: string;                    // DIFF-XXXX
+  exp_a: string;                 // EXP-ID de référence
+  exp_b: string;                 // EXP-ID variant
+  structural_difference: boolean; // schémas JSON différents
+  behavioral_difference: boolean; // mêmes schémas, sémantique différente
+  leaked_fields: string[];        // champs présents dans B mais pas attendus
+  status_difference: boolean;
+  body_similarity: number;        // 0.0 → 1.0 (Jaccard sur les clés JSON)
+  verdict: "SIGNIFICANT" | "INSIGNIFICANT" | "AMBIGUOUS";
+  verdict_rationale: string;
+}
+```
+
+Règles de verdict :
+- `status_difference AND behavioral_difference` → SIGNIFICANT
+- `structural_difference` → SIGNIFICANT
+- `leaked_fields.length > 0` → SIGNIFICANT
+- Différence de valeurs uniquement sans changement de schéma → AMBIGUOUS (nécessite LLM Layer)
+
+#### Confidence Model
+
+Le score de confiance d'une hypothèse est calculé formellement :
+
+```
+confidence(H) = w1 × reproducibility
+              + w2 × consistency
+              + w3 × coverage
+              + w4 × oracle_strength
+
+reproducibility : fraction des replays qui confirment le résultat initial
+consistency     : fraction des variantes convergentes vers le même verdict
+coverage        : log(1 + n_experiments) / log(1 + n_required)
+oracle_strength : certitude sémantique du diff (SIGNIFICANT=1, AMBIGUOUS=0.5, INSIGNIFICANT=0)
+
+poids défaut    : w1=0.35, w2=0.30, w3=0.20, w4=0.15
+seuil CONFIRMED : confidence ≥ 0.85
+seuil REFUTED   : toutes les expériences → verdict INSIGNIFICANT
+sinon           : INSUFFICIENT_DATA
+```
+
+**Finding :**
+
+```typescript
+interface Finding {
+  id: string;                    // FIND-XXXX
+  hypothesis_id: string;
+  status: "CONFIRMED" | "REFUTED";
+  confidence: number;
+  owasp_category: string;
+  cwe_id: string;
+  severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
+  affected_endpoints: string[];
+  proof: {
+    observations: string[];      // IDs OBS
+    experiments: string[];       // IDs EXP
+    diffs: string[];             // IDs DIFF
+    reproduction_steps: string[];
+    har_export_path?: string;
+  };
+  remediation_hint: string;
+}
+```
+
+---
+
+### 4.8 Report Engine
+
+**Responsabilité :** agréger les Findings confirmés, générer les exports (Markdown, JSON, HAR).
+
+**Formats de sortie :**
+
+| Format | Usage |
+|---|---|
+| `report.md` | Rapport lisible, structuré par sévérité |
+| `findings.json` | Export machine-readable pour intégration CI/CD |
+| `evidence/*.har` | Replay de session pour chaque finding (standard HTTP Archive) |
+| `summary.json` | Métriques : n findings par sévérité, couverture, durée |
+
+**Structure du rapport Markdown :**
+
+```
+# Rapport HDWP — [Target] — [Date]
+
+## Résumé exécutif
+## Couverture de l'analyse
+## Findings critiques
+## Findings hauts
+## Findings moyens
+## Findings bas
+## Hypothèses réfutées (annexe)
+## Méthode
+```
+
+---
+
+## 5. Système de plugins
+
+### 5.1 Plugin Contract
+
+Tout plugin doit implémenter l'interface suivante :
+
+```typescript
+interface HDWPPlugin {
+  // Métadonnées
+  readonly id: string;              // ex: "core.bola"
+  readonly name: string;
+  readonly version: string;
+  readonly category: PluginCategory;
+  readonly owasp_mapping: string[]; // ex: ["A01:2021"]
+  readonly cwe_mapping: string[];
+
+  // Cycle de vie
+  onLoad(registry: PluginRegistry): Promise<void>;
+  onModelReady(model: ApplicationModel): Promise<void>;
+  onUnload(): Promise<void>;
+
+  // Génération d'hypothèses
+  generateHypotheses(model: ApplicationModel): Promise<Hypothesis[]>;
+
+  // Oracle sémantique (optionnel — override du Semantic Diff par défaut)
+  semanticOracle?(diff: RawDiff): Promise<SemanticVerdict>;
+
+  // Accès aux données (read-only)
+  readonly dataAccess: "MODEL_READ" | "OBSERVATIONS_READ" | "EXPERIMENTS_READ";
+}
+
+type PluginCategory =
+  | "access_control"
+  | "injection"
+  | "auth"
+  | "business_logic"
+  | "information_disclosure"
+  | "cryptography"
+  | "configuration";
+```
+
+**Contraintes du contrat :**
+- Un plugin ne peut **jamais** émettre de requête réseau directement. Il passe par l'Experiment Engine.
+- Un plugin ne peut **jamais** écrire dans le modèle applicatif. Lecture seule.
+- Un plugin ne peut **jamais** statuer sur une hypothèse. C'est le rôle exclusif de l'Evidence Engine.
+- La fonction `generateHypotheses` doit retourner un résultat en moins de 5 secondes.
+
+### 5.2 Plugin Registry
+
+```typescript
+interface PluginRegistry {
+  register(plugin: HDWPPlugin): void;
+  unregister(pluginId: string): void;
+  get(pluginId: string): HDWPPlugin | undefined;
+  list(): PluginMeta[];
+  getByCategory(category: PluginCategory): HDWPPlugin[];
+  isEnabled(pluginId: string): boolean;
+}
+```
+
+Le Registry est initialisé depuis la configuration :
+
+```yaml
+# hdwp-context.yaml (section plugins)
+plugins:
+  enabled:
+    - "core.bola"
+    - "core.authz"
+    - "core.sqli"
+    - "core.xss"
+    - "core.ssrf"
+    - "core.idor"
+    - "core.race_condition"
+    - "core.jwt"
+    - "community.graphql_abuse"   # plugin tiers
+  disabled:
+    - "core.xss"                  # désactivé pour cet engagement
+  config:
+    "core.bola":
+      min_roles_required: 2       # n'active l'hypothèse BOLA que si ≥ 2 rôles observés
+```
+
+### 5.3 Plugins natifs (Core Plugins)
+
+| Plugin ID | Catégorie | Hypothèses générées |
+|---|---|---|
+| `core.bola` | access_control | Accès cross-user aux objets via paramètres d'ID |
+| `core.authz` | access_control | Accès aux endpoints privés sans autorisation correcte |
+| `core.idor` | access_control | Références directes à des objets sans vérification d'ownership |
+| `core.priv_escalation` | access_control | Transition vers un état de privilège supérieur non autorisé |
+| `core.sqli` | injection | Injection SQL via paramètres utilisateur contrôlés |
+| `core.xss` | injection | Injection XSS réfléchie et stockée |
+| `core.ssrf` | injection | Requêtes côté serveur vers des URL contrôlées par l'utilisateur |
+| `core.ssti` | injection | Injection de templates côté serveur |
+| `core.jwt` | auth | Algorithme `none`, secret faible, claims non vérifiés |
+| `core.session` | auth | Fixation de session, non-invalidation post-logout |
+| `core.race_condition` | business_logic | Conditions de course sur des opérations critiques (paiement, stock) |
+| `core.mass_assignment` | injection | Assignation de masse via champs supplémentaires en body |
+| `core.info_disclosure` | information_disclosure | Stack traces, chemins internes, données sensibles en réponse |
+| `core.cors` | configuration | Politique CORS permissive exploitable |
+| `core.headers` | configuration | En-têtes de sécurité absents ou mal configurés |
+
+---
+
+## 6. Flux de données
+
+### 6.1 Flux principal (mode actif complet)
+
+```
+1. CLI démarre → charge hdwp-context.yaml → Context Loader initialise le ScopeGuard
+2. Plugin Registry charge les plugins activés
+3. Observation Engine démarre (proxy passif + crawl initial)
+4. Chaque RawObservation → Application Model (mise à jour incrémentale)
+5. Chaque séquence de session → State Machine Learner (mise à jour FSM)
+6. Quand model_confidence ≥ seuil_minimal :
+   → Hypothesis Engine interroge chaque plugin activé
+   → Chaque plugin retourne ses Hypothesis[]
+   → Hypothesis Engine priorise et déduplique
+7. Pour chaque hypothèse PENDING (par priorité décroissante) :
+   → Experiment Engine génère les ExperimentSpec
+   → Temporal Module / Mutation Module exécutent les requêtes
+   → Chaque ExperimentResult → Evidence Engine
+8. Evidence Engine :
+   → Semantic Diff compare les résultats
+   → Confidence Model calcule le score
+   → Si confidence ≥ 0.85 → Finding CONFIRMED
+   → Si toutes expériences insignifiantes → Finding REFUTED
+   → Sinon → génère de nouvelles ExperimentSpec (boucle)
+9. [Optionnel] LLM Layer analyse les AMBIGUOUS et les INSUFFICIENT_DATA
+10. Report Engine agrège tous les Findings → rapport + HAR
+```
+
+### 6.2 Flux passif uniquement
+
+```
+1. Proxy MITM configuré sur le navigateur du testeur
+2. Observation Engine capture le trafic généré manuellement
+3. Application Model se construit en temps réel
+4. Hypothesis Engine génère des hypothèses (non exécutées)
+5. Testeur lance manuellement les expériences via CLI ou UI
+```
+
+---
+
+## 7. Modèles de données
+
+### 7.1 Evidence Store
+
+Toutes les données sont persistées dans un **Evidence Store** local (SQLite en v1, PostgreSQL en v2).
+
+```
+evidence_store/
+├── observations/          # RawObservation sérialisées
+├── experiments/           # ExperimentResult + requêtes/réponses brutes
+├── diffs/                 # SemanticDiff
+├── hypotheses/            # Hypothesis avec historique de statut
+├── findings/              # Finding confirmés
+├── har/                   # Exports HAR par finding
+└── model/                 # ApplicationModel snapshots
+```
+
+### 7.2 IDs et traçabilité
+
+Chaque entité a un ID préfixé unique :
+
+| Préfixe | Entité |
+|---|---|
+| `OBS-` | RawObservation |
+| `EXP-` | ExperimentResult |
+| `DIFF-` | SemanticDiff |
+| `HYP-` | Hypothesis |
+| `FIND-` | Finding |
+| `FSM-` | ApplicationFSM |
+| `PLG-` | PluginInstance |
+
+Toute référence inter-entité utilise ces IDs. Le Report Engine peut reconstituer la chaîne complète `FIND → HYP → EXP → OBS` pour chaque finding.
+
+---
+
+## 8. Interfaces entre composants
+
+### 8.1 Event Bus
+
+```typescript
+interface HDWPEvent<T> {
+  type: string;
+  source: string;          // composant émetteur
+  timestamp: string;
+  payload: T;
+}
+
+// Événements principaux
+type HDWPEventMap = {
+  "observation.raw":          RawObservation;
+  "model.updated":            ApplicationModel;
+  "fsm.updated":              ApplicationFSM;
+  "hypothesis.generated":     Hypothesis;
+  "hypothesis.status_changed": { id: string; old: HypothesisStatus; new: HypothesisStatus };
+  "experiment.result":        ExperimentResult;
+  "diff.computed":            SemanticDiff;
+  "finding.confirmed":        Finding;
+  "finding.refuted":          Finding;
+  "report.generated":         { path: string; summary: ReportSummary };
+};
+```
+
+### 8.2 API CLI
+
+```
+hdwp run   --context hdwp-context.yaml [--passive-only] [--hypothesis HYP-042]
+hdwp model --context hdwp-context.yaml --export model.json
+hdwp report --session SESSION_ID --format [md|json|har]
+hdwp replay --experiment EXP-017
+hdwp plugin list
+hdwp plugin enable core.sqli
+hdwp plugin install ./path/to/custom-plugin.js
+```
+
+---
+
+## 9. Couche LLM
+
+### 9.1 Positionnement
+
+Le LLM intervient **uniquement** dans les cas suivants :
+
+1. Désambiguïsation d'un `SemanticDiff` au verdict `AMBIGUOUS`
+2. Génération d'hypothèses complémentaires sur des patterns non couverts par les plugins
+3. Interprétation de JavaScript obfusqué extrait par le `JSExtractor`
+4. Génération de la section "remediation_hint" des Findings
+5. Résumé exécutif du rapport
+
+### 9.2 Contraintes
+
+- Le LLM ne peut pas statuer CONFIRMED sur une hypothèse.
+- Toute output LLM est taguée `source: "llm"` et distinguée des preuves empiriques.
+- Le moteur fonctionne sans LLM ; la couche LLM est un module optionnel activable dans le contexte.
+
+### 9.3 Interface
+
+```typescript
+interface LLMLayer {
+  disambiguateDiff(diff: SemanticDiff, context: ApplicationModel): Promise<SemanticVerdict>;
+  proposeHypotheses(model: ApplicationModel, existing: Hypothesis[]): Promise<Hypothesis[]>;
+  interpretJS(source: string): Promise<ExtractedRoutes>;
+  generateRemediationHint(finding: Finding): Promise<string>;
+  generateExecutiveSummary(report: ReportData): Promise<string>;
+}
+```
+
+Le système prompt utilisé par la couche LLM est défini dans `PROMPT_SYSTEM.md` (voir document séparé).
+
+---
+
+## 10. Sécurité interne et éthique opérationnelle
+
+### 10.1 ScopeGuard
+
+```typescript
+interface ScopeGuard {
+  check(url: string, method: HttpMethod): ScopeVerdict;
+  // Retourne ALLOWED | BLOCKED_OUT_OF_SCOPE | BLOCKED_DESTRUCTIVE | BLOCKED_RATE_LIMIT
+}
+```
+
+Toute requête bloquée est loggée avec raison. Le moteur s'arrête si le ScopeGuard est désactivé.
+
+### 10.2 Gestion des credentials
+
+- Les tokens et mots de passe sont chargés depuis des variables d'environnement, jamais depuis le fichier de contexte en clair.
+- Aucune credential ne transite dans l'Evidence Store. Seuls les IDs de rôle sont référencés.
+- Les réponses HTTP contenant des credentials (Authorization headers) sont masquées avant persistance.
+
+### 10.3 Rate limiting
+
+Le Context Loader définit `max_requests_per_minute`. L'Experiment Engine maintient un `TokenBucket` par session et bloque les émissions si la limite est atteinte.
+
+### 10.4 Flag `allow_write`
+
+Par défaut à `false`. Sans ce flag, toute requête `POST`, `PUT`, `PATCH`, `DELETE` sur un endpoint non-idempotent est bloquée.
+
+---
+
+## 11. Stack technique
+
+| Couche | Choix | Justification |
+|---|---|---|
+| Langage noyau | Python 3.12 | Écosystème sécurité riche (mitmproxy, requests, scapy), typage strict avec mypy |
+| Event Bus | `asyncio` + `pyee` | Légèreté, pas de dépendance externe lourde |
+| HTTP Engine | `httpx` | Async natif, HTTP/2, support proxy |
+| Proxy MITM | `mitmproxy` (lib) | Standard de facto, extensible en Python |
+| Evidence Store v1 | SQLite + `SQLModel` | Zéro infrastructure, portable |
+| Evidence Store v2 | PostgreSQL | Pour déploiements partagés / équipes |
+| CLI | `typer` | Typage, autocomplétion, sous-commandes |
+| LLM Layer | API Anthropic (`claude-sonnet-4-6`) | Défaut, configurable |
+| Tests | `pytest` + `pytest-asyncio` | Standard Python |
+| Packaging plugins | Wheel Python standard | Un plugin = un package installable via pip |
+
+---
+
+## 12. Structure des répertoires
+
+```
+hdwp/
+├── hdwp/
+│   ├── core/
+│   │   ├── observation/
+│   │   │   ├── engine.py
+│   │   │   ├── proxy_capture.py
+│   │   │   ├── active_crawler.py
+│   │   │   ├── js_extractor.py
+│   │   │   └── dom_analyzer.py
+│   │   ├── model/
+│   │   │   ├── application_model.py
+│   │   │   ├── state_machine_learner.py
+│   │   │   └── schemas.py
+│   │   ├── context/
+│   │   │   ├── loader.py
+│   │   │   └── scope_guard.py
+│   │   ├── hypothesis/
+│   │   │   └── engine.py
+│   │   ├── experiment/
+│   │   │   ├── engine.py
+│   │   │   ├── mutation_module.py
+│   │   │   └── temporal_module.py
+│   │   ├── evidence/
+│   │   │   ├── engine.py
+│   │   │   ├── semantic_diff.py
+│   │   │   └── confidence_model.py
+│   │   ├── report/
+│   │   │   ├── engine.py
+│   │   │   └── har_exporter.py
+│   │   ├── llm/
+│   │   │   └── layer.py
+│   │   └── bus/
+│   │       └── event_bus.py
+│   ├── plugins/
+│   │   ├── base.py              # HDWPPlugin interface
+│   │   ├── registry.py
+│   │   └── core/
+│   │       ├── bola.py
+│   │       ├── authz.py
+│   │       ├── idor.py
+│   │       ├── sqli.py
+│   │       ├── xss.py
+│   │       ├── ssrf.py
+│   │       ├── jwt.py
+│   │       ├── session.py
+│   │       ├── race_condition.py
+│   │       ├── mass_assignment.py
+│   │       ├── info_disclosure.py
+│   │       ├── cors.py
+│   │       └── headers.py
+│   ├── store/
+│   │   ├── sqlite.py
+│   │   └── models.py
+│   └── cli/
+│       └── main.py
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── fixtures/
+├── docs/
+│   ├── SAD_HDWP_Engine.md       # ce document
+│   ├── PROMPT_SYSTEM.md
+│   └── PLUGIN_AUTHORING.md
+├── hdwp-context.example.yaml
+├── pyproject.toml
+└── README.md
+```
+
+---
+
+## 13. Décisions architecturales (ADR)
+
+### ADR-001 — Event Bus plutôt qu'appels directs entre composants
+
+**Contexte :** Les huit composants doivent collaborer sans créer un graphe de dépendances circulaires.
+
+**Décision :** Tous les composants communiquent exclusivement via un Event Bus asynchrone. Aucun composant n'importe un autre composant.
+
+**Conséquences :** Couplage minimal. Testabilité maximale (on peut tester chaque composant en lui injectant des événements synthétiques). Légère complexité de traçage du flux en debug → compensée par le logging structuré de chaque événement.
+
+---
+
+### ADR-002 — Le LLM ne peut pas confirmer une vulnérabilité
+
+**Contexte :** L'intégration d'un LLM crée un risque de faux positifs si on lui permet de conclure directement.
+
+**Décision :** L'Evidence Engine est le seul composant autorisé à statuer CONFIRMED ou REFUTED. Le LLM produit des inputs (hypothèses candidates, désambiguïsations) mais pas des verdicts.
+
+**Conséquences :** Réduction des faux positifs. Exigence d'expériences empiriques pour chaque confirmation — ce qui est précisément le comportement souhaité.
+
+---
+
+### ADR-003 — Plugin = package Python installable
+
+**Contexte :** Le système de plugins doit être extensible par la communauté sans modifier le noyau.
+
+**Décision :** Un plugin est un package Python standard avec un entry point déclaré dans `pyproject.toml`. Le Registry le découvre via `importlib.metadata`.
+
+**Conséquences :** Ecosystème PyPI exploitable. Versioning standard. Isolation des dépendances par plugin. Contrepartie : légère friction d'installation pour les plugins tiers.
+
+---
+
+### ADR-004 — SQLite par défaut, PostgreSQL en option
+
+**Contexte :** La portabilité est critique — l'outil doit fonctionner sans infrastructure sur le poste d'un testeur seul.
+
+**Décision :** `SQLModel` avec backend SQLite par défaut, PostgreSQL configurable dans le contexte pour les déploiements équipe.
+
+**Conséquences :** Zéro prérequis d'infrastructure en mode solo. Migration transparente vers PostgreSQL via URL de connexion.
+
+---
+
+### ADR-005 — Le ScopeGuard est non-débrayable au runtime
+
+**Contexte :** Un utilisateur pourrait vouloir désactiver le scope pour aller plus vite.
+
+**Décision :** Le ScopeGuard ne peut être désactivé qu'au démarrage via un flag CLI explicite `--no-scope-guard` accompagné d'un prompt de confirmation. Toute requête hors scope sans ce flag lève une exception non récupérable.
+
+**Conséquences :** Protection contre les erreurs accidentelles hors scope. Comportement éthique par défaut.
+
+---
+
+*Fin du document SAD — HDWP Engine v1.0.0*
