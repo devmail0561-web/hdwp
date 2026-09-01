@@ -48,14 +48,13 @@ class HDWPApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        if self._auto_start_url:
-            # Skip TargetScreen, aller directement au scan
-            from hdwp.tui.screens.scan import ScanScreen
-            from hdwp.tui.screens.target import TargetScreen
+        from hdwp.tui.screens.target import TargetScreen
 
-            # Push TargetScreen first (required for switch_screen), then switch
-            self.push_screen(TargetScreen())
-            self.switch_screen(
+        if self._auto_start_url:
+            # Skip TargetScreen, go directly to ScanScreen
+            from hdwp.tui.screens.scan import ScanScreen
+
+            self.push_screen(
                 ScanScreen(
                     target_url=self._auto_start_url,
                     context_path=self._context_path,
@@ -63,8 +62,6 @@ class HDWPApp(App):
                 )
             )
         else:
-            from hdwp.tui.screens.target import TargetScreen
-
             self.push_screen(TargetScreen())
 
     def action_quit(self) -> None:
