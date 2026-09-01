@@ -191,12 +191,13 @@ class KnowledgeBase:
         ]
 
     async def get_session_count(self) -> int:
-        from sqlalchemy import func
+        from sqlalchemy import func, select as sql_select
         engine = await self._get_engine()
         async with AsyncSession(engine, expire_on_commit=False) as session:
-            result = await session.exec(select(func.count(SessionMetaRecord.session_id)))
+            stmt = sql_select(func.count()).select_from(SessionMetaRecord)
+            result = await session.execute(stmt)
             count = result.scalar()
-            return count or 0
+            return int(count) if count is not None else 0
 
     async def reset(self) -> None:
         """Réinitialise pattern_stats (garde session_meta pour l'historique)."""

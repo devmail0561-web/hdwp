@@ -37,6 +37,11 @@ class TokenBucket:
                 wait = (1.0 - self._tokens) / self._rate
             await asyncio.sleep(wait)
 
+    @property
+    def max_rate(self) -> float:
+        """Returns the rate in tokens per second."""
+        return self._rate
+
     @classmethod
     def from_rpm(cls, requests_per_minute: int) -> "TokenBucket":
         """Create a bucket calibrated to *requests_per_minute*."""

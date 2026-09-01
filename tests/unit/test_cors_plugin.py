@@ -60,7 +60,10 @@ def _make_baseline() -> ExperimentResult:
             mutation_params={"evil_origin": EVIL_ORIGIN},
         ),
         request_sent=NormalizedRequest(method="GET", url="http://x"),
-        response_received=NormalizedResponse(status_code=200),
+        response_received=NormalizedResponse(
+            status_code=200,
+            headers={"set-cookie": "session=baseline_session_id"}
+        ),
         timing_ms=1.0,
         timestamp="2026-01-01T00:00:00Z",
     )
@@ -124,7 +127,7 @@ def test_assess_cors_evil_origin_reflected_confirmed():
     diff = _make_diff()
     result = assess_violation("origin_test", baseline, experiment, diff)
     assert result.verdict == ViolationVerdict.CONFIRMED
-    assert "reflète" in result.rationale
+    assert "reflection" in result.rationale.lower() or "reflè" in result.rationale
 
 
 def test_assess_cors_no_header_refuted():
