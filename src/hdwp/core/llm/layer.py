@@ -92,6 +92,15 @@ class LLMLayerProtocol(ABC):
         """
         ...
 
+    @abstractmethod
+    async def generate_exploit_context(self, finding: Finding) -> dict:
+        """
+        Analyse contextuelle de la vulnérabilité. ADR-002 : informatif uniquement.
+        Retourne {explanation: str, alternative_payloads: list[str]}.
+        Le résultat n'est JAMAIS utilisé comme preuve ou verdict.
+        """
+        ...
+
 
 class AnthropicLLMLayer(LLMLayerProtocol):
     """Implémentation Anthropic de la couche LLM."""
@@ -245,6 +254,35 @@ class AnthropicLLMLayer(LLMLayerProtocol):
             log.warning("llm.propose_hypotheses_failed", error=str(exc))
             return []
 
+    async def generate_exploit_context(self, finding: Finding) -> dict:
+        endpoint = finding.affected_endpoints[0] if finding.affected_endpoints else "inconnu"
+        prompt = (
+            "You are a security researcher providing INFORMATIONAL analysis only. "
+            "This output will NOT be used as security evidence (ADR-002).\n\n"
+            f"Vulnerability: {finding.cwe_id} — {finding.owasp_category}\n"
+            f"Severity: {finding.severity}\n"
+            f"Affected: {endpoint}\n"
+            f"Remediation hint: {finding.remediation_hint}\n\n"
+            "Provide: 1) A 2-sentence explanation of this vulnerability class. "
+            "2) 2-3 alternative payload variations for testing (informational only). "
+            'Format as JSON: {"explanation": "...", "alternative_payloads": [...]}'
+        )
+        try:
+            import json as _json
+            resp = await self._client.messages.create(
+                model=self._model,
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = resp.content[0].text.strip()
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                return _json.loads(raw[start:end])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.exploit_context_failed", error=str(exc))
+        return {"explanation": finding.remediation_hint, "alternative_payloads": []}
+
 
 class OpenAICompatibleLLMLayer(LLMLayerProtocol):
     """
@@ -372,10 +410,36 @@ class OpenAICompatibleLLMLayer(LLMLayerProtocol):
                 messages=[{"role": "user", "content": prompt}],
             )
             lines = (resp.choices[0].message.content or "").strip().split("\n")
-            return [l.strip() for l in lines if l.strip().startswith("Il est possible")][:3]
+            return [ln.strip() for ln in lines if ln.strip().startswith("Il est possible")][:3]
         except Exception as exc:  # noqa: BLE001
             log.warning("llm.propose_hypotheses_failed", error=str(exc))
             return []
+
+    async def generate_exploit_context(self, finding: Finding) -> dict:
+        endpoint = finding.affected_endpoints[0] if finding.affected_endpoints else "inconnu"
+        prompt = (
+            "You are a security researcher providing INFORMATIONAL analysis only. "
+            "This output will NOT be used as security evidence (ADR-002).\n\n"
+            f"Vulnerability: {finding.cwe_id} — {finding.owasp_category}\n"
+            f"Severity: {finding.severity}\nAffected: {endpoint}\n"
+            f"Remediation hint: {finding.remediation_hint}\n\n"
+            "Provide: 1) A 2-sentence explanation. 2) 2-3 alternative payload variations. "
+            'Format: {"explanation": "...", "alternative_payloads": [...]}'
+        )
+        try:
+            import json as _json
+            resp = await self._client.chat.completions.create(
+                model=self._model, max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                return _json.loads(raw[start:end])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.exploit_context_failed", error=str(exc))
+        return {"explanation": finding.remediation_hint, "alternative_payloads": []}
 
 
 def _build_disambiguation_prompt(

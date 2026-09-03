@@ -14,6 +14,15 @@ from hdwp.core.model.schemas import (
 class AuthorizationInference:
     """Infers authorization properties from the application model."""
 
+    def __init__(
+        self,
+        kb_stats: dict[tuple[str, str], dict[str, float]] | None = None,
+    ) -> None:
+        self._kb_stats = kb_stats or {}
+
+    def provider_id(self) -> str:
+        return "builtin.authorization"
+
     def infer(self, model: ApplicationModelData) -> list[SecurityProperty]:
         properties: list[SecurityProperty] = []
         properties.extend(self._infer_bola(model))
@@ -30,7 +39,16 @@ class AuthorizationInference:
                     for ep in model.endpoints
                     if param.id in ep.parameters or param.name in ep.path
                 ]
-                confidence = 0.8 if len(model.roles) >= 2 else 0.5
+                base_confidence = 0.8 if len(model.roles) >= 2 else 0.5
+                bola_stats = self._kb_stats.get(
+                    ("authorization", "object_ref_change"), {}
+                )
+                if bola_stats.get("total", 0) >= 3:
+                    historical_rate = bola_stats.get("confirmed_rate", 0.5)
+                    confidence = 0.3 * base_confidence + 0.7 * historical_rate
+                    confidence = max(0.3, min(0.95, confidence))
+                else:
+                    confidence = base_confidence
                 props.append(
                     SecurityProperty(
                         id=generate_id("PROP"),

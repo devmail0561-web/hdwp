@@ -14,3 +14,7 @@ build/
 *.har
 htmlcov/
 .coverage
+
+# React frontend
+src/hdwp/app/node_modules/
+src/hdwp/app/dist/

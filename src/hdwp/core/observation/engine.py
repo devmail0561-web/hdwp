@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import structlog
 
 from hdwp.core.bus.event_bus import AsyncEventBus
@@ -10,6 +12,9 @@ from hdwp.core.context.loader import EngineContext
 from hdwp.core.context.scope_guard import ScopeGuard
 from hdwp.core.experiment.rate_limiter import TokenBucket
 from hdwp.core.observation.active_crawler import ActiveCrawler
+
+if TYPE_CHECKING:
+    from hdwp.core.llm.layer import LLMLayerProtocol
 
 log = structlog.get_logger()
 
@@ -20,12 +25,17 @@ class ObservationEngine:
         bus: AsyncEventBus,
         context: EngineContext,
         scope_guard: ScopeGuard,
+        llm_layer: LLMLayerProtocol | None = None,
+        proxy_url: str | None = None,
     ) -> None:
         self._bus = bus
         self._context = context
         self._scope_guard = scope_guard
         self._running = False
         self._proxy: object | None = None
+        self._llm_layer = llm_layer
+        self._proxy_url = proxy_url
+        self._crawler: ActiveCrawler | None = None
 
     async def start(self) -> None:
         self._running = True
@@ -46,14 +56,17 @@ class ObservationEngine:
             log.info("observation_engine.openapi_auto_seeded", observations=seeded)
 
         # 2. Crawl HTML (et extraction JS)
-        crawler = ActiveCrawler(
+        self._crawler = ActiveCrawler(
             bus=self._bus,
             scope_guard=self._scope_guard,
             rate_limiter=rate_limiter,
             roles=self._context.config.roles,
             session_id=self._context.session_id,
+            llm_layer=self._llm_layer,
+            proxy_url=self._proxy_url,
+            emit_observations=(self._proxy_url is None),
         )
-        await crawler.crawl(self._context.base_url)
+        await self._crawler.crawl(self._context.base_url)
         self._running = False
         log.info("observation_engine.done")
 
@@ -86,3 +99,15 @@ class ObservationEngine:
     @property
     def running(self) -> bool:
         return self._running
+
+    @property
+    def collected_script_urls(self) -> frozenset[str]:
+        return self._crawler.script_urls if self._crawler else frozenset()
+
+    @property
+    def collected_script_contents(self) -> dict[str, str]:
+        return self._crawler.script_contents if self._crawler else {}
+
+    @property
+    def collected_script_pages(self) -> dict[str, list[str]]:
+        return self._crawler.script_pages if self._crawler else {}

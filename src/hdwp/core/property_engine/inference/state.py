@@ -27,6 +27,9 @@ _STEP_PATTERN = re.compile(
 class StateInference:
     """Infers state-transition properties from the application model."""
 
+    def provider_id(self) -> str:
+        return "builtin.state"
+
     def infer(self, model: ApplicationModelData) -> list[SecurityProperty]:
         props: list[SecurityProperty] = []
 

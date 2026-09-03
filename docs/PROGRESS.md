@@ -1,6 +1,6 @@
 # Progression de l'implémentation — HDWP Engine
 
-Dernière mise à jour : 2026-09-01
+Dernière mise à jour : 2026-09-03
 
 ---
 
@@ -18,9 +18,10 @@ Phase 5.5 LLM minimaliste         [DONE] █████████████
 Phase 6  Proxy, FSM, Alembic, OpenAPI [DONE] ████████████████████ 100%
 Audit corrections (v0.3.1)            [DONE] ████████████████████ 100%
 Phase 7  LLM complet                  [DONE] ████████████████████ 100%
+Apprentissage adaptatif                [DONE] ████████████████████ 100%
 ```
 
-**Tests :** 390 | `ruff check src/` : 0 erreurs | Fichiers source : 62 | Version : 0.5.0
+**Tests :** 491 | `ruff check src/` : 0 erreurs | Fichiers source : 62 | Version : 0.5.0
 
 ---
 
@@ -64,6 +65,8 @@ Phase 7  LLM complet                  [DONE] ███████████�
 | PassiveFindingEngine | `core/oracle/passive_engine.py` | 9 |
 | SemanticOracle | `core/oracle/engine.py` | 10 |
 | ConfidenceModel | `core/oracle/confidence.py` | 12 |
+| KnowledgeBase | `core/knowledge/base.py` | 23 |
+| InferenceRegistry | `core/property_engine/inference_registry.py` | (dans test_knowledge_base) |
 | HDWPEngine | `core/engine.py` | (via intégration) |
 | JWTPlugin | `plugins/core/session_property/jwt.py` | — |
 | CORSPlugin | `plugins/core/configuration/cors.py` | 8 |
@@ -138,8 +141,13 @@ Phase 7  LLM complet                  [DONE] ███████████�
 
 ---
 
-## Prochaine étape
+## Dernière implémentation
 
-**Phase 5 — ReportEngine** est la prochaine étape. Le pipeline est complet et fonctionnel. Le moteur détecte : BOLA/IDOR, AuthZ bypass, SQLi, XSS, SSTI, mass assignment, CORS, JWT (alg:none, expired, weak secret), headers manquants, server disclosure, cookies non-sécurisés, race conditions. Ce qui manque : les rapports lisibles (Markdown, HAR) et le LLM pour désambiguïser les cas AMBIGUOUS.
-
-Commencer par : `src/hdwp/core/experiment/mutation_module.py`
+**Apprentissage adaptatif** — Le moteur adapte désormais son comportement au fil des sessions :
+- Classification de cible (`api`, `cms`, `spa`, `graphql`) pour poids per-target
+- Poids de priorité adaptatifs par type de cible (`get_adapted_weights(target_type=)`)
+- Poids de confiance modèle adaptatifs (`get_confidence_weights()`)
+- Confiance BOLA adaptative via `kb_stats` injectés dans `InferenceRegistry`
+- API `/knowledge/learning-health` + section frontend
+- Migration backward-compatible de la KB (3-column PK pour `pattern_stats`)
+- 12 nouveaux tests, 4 tests pré-existants corrigés → 491 tests passants

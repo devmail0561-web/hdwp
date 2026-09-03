@@ -71,9 +71,10 @@ def test_extract_links_from_html() -> None:
     </html>
     """
     links = extract_links(html, "http://test.local")
-    assert "http://test.local/page1" in links
-    assert "http://test.local/page2" in links
-    assert "http://test.local/submit" in links
+    urls = [url for url, _method in links]
+    assert "http://test.local/page1" in urls
+    assert "http://test.local/page2" in urls
+    assert "http://test.local/submit" in urls
 
 
 def test_extract_links_ignores_javascript() -> None:
@@ -85,7 +86,8 @@ def test_extract_links_ignores_javascript() -> None:
 def test_extract_links_resolves_relative() -> None:
     html = '<a href="sub/page">Page</a>'
     links = extract_links(html, "http://test.local/dir/")
-    assert "http://test.local/dir/sub/page" in links
+    urls = [url for url, _method in links]
+    assert "http://test.local/dir/sub/page" in urls
 
 
 # ── crawler ──────────────────────────────────────────────

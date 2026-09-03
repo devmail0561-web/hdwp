@@ -66,6 +66,7 @@ class ThreatModelConfig(BaseModel):
 class OptionsConfig(BaseModel):
     allow_write: bool = False
     max_requests_per_minute: int = 60
+    max_concurrent_experiments: int = 3  # expériences en parallèle dans le pipeline réactif
     language: str = "en"
     knowledge_db: str | None = None  # None → ~/.hdwp/knowledge.db
 

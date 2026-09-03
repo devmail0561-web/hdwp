@@ -28,16 +28,27 @@ class ScopeGuard:
         self._exclude_patterns = context.config.scope.exclude
         self._allow_write = context.config.options.allow_write
 
+    def _url_matches(self, url: str, pattern: str) -> bool:
+        """Match url against pattern, also trying with trailing slash.
+        Handles the case where the scope is 'https://example.com/*' but the seed
+        URL is 'https://example.com' (without trailing slash)."""
+        if fnmatch(url, pattern):
+            return True
+        # Try appending a slash — catches 'https://example.com' vs 'https://example.com/*'
+        if not url.endswith("/") and fnmatch(url + "/", pattern):
+            return True
+        return False
+
     def check(self, url: str, method: str) -> ScopeVerdict:
         method_upper = method.upper()
 
         for pattern in self._exclude_patterns:
-            if fnmatch(url, pattern):
+            if self._url_matches(url, pattern):
                 verdict = ScopeVerdict.BLOCKED_OUT_OF_SCOPE
                 self._log(url, method_upper, verdict)
                 return verdict
 
-        in_scope = any(fnmatch(url, pattern) for pattern in self._include_patterns)
+        in_scope = any(self._url_matches(url, pattern) for pattern in self._include_patterns)
         if not in_scope:
             verdict = ScopeVerdict.BLOCKED_OUT_OF_SCOPE
             self._log(url, method_upper, verdict)

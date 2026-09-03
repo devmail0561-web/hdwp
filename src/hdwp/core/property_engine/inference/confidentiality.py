@@ -14,6 +14,9 @@ from hdwp.core.model.schemas import (
 class ConfidentialityInference:
     """Infers confidentiality properties from the application model."""
 
+    def provider_id(self) -> str:
+        return "builtin.confidentiality"
+
     def infer(self, model: ApplicationModelData) -> list[SecurityProperty]:
         properties: list[SecurityProperty] = []
 

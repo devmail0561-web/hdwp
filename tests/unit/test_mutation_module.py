@@ -7,9 +7,8 @@ import pytest
 
 from hdwp.core.context.config_schema import CredentialConfig, RoleConfig
 from hdwp.core.experiment.mutation_module import MutationModule, _replace_first_id_in_path
-from hdwp.core.experiment.request_selector import ConcreteExperimentPlan
 from hdwp.core.experiment.session_manager import SessionManager
-from hdwp.core.model.schemas import ExperimentSpec, NormalizedRequest
+from hdwp.core.model.schemas import ConcreteExperimentPlan, ExperimentSpec, NormalizedRequest
 
 
 def _req(

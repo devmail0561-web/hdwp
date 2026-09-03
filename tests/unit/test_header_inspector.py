@@ -12,7 +12,8 @@ def _make_response(headers: dict[str, str]) -> NormalizedResponse:
 def test_missing_security_headers_detected() -> None:
     inspector = HeaderInspector()
     resp = _make_response({})
-    tags = inspector.inspect(resp)
+    # HSTS only checked for HTTPS targets
+    tags = inspector.inspect(resp, request_url="https://example.com")
     assert "missing:HSTS" in tags
     assert "missing:CSP" in tags
     assert "missing:XFO" in tags

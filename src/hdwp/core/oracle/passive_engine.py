@@ -147,6 +147,7 @@ class PassiveFindingEngine:
                 findings.append(self._make_finding(
                     obs, desc, owasp, cwe, severity,
                     remediation=f"Ajouter le header {tag.split(':')[1]} dans toutes les réponses HTTP.",
+                    passive_tags=[tag],
                 ))
         return findings
 
@@ -167,7 +168,7 @@ class PassiveFindingEngine:
         findings = []
         for tag, (desc, owasp, cwe, severity, remediation) in COOKIE_FLAG_FINDINGS.items():
             if tag in obs.tags:
-                findings.append(self._make_finding(obs, desc, owasp, cwe, severity, remediation))
+                findings.append(self._make_finding(obs, desc, owasp, cwe, severity, remediation, passive_tags=[tag]))
         return findings
 
     def _check_stack_traces(self, obs: RawObservation) -> list[Finding]:
@@ -197,6 +198,7 @@ class PassiveFindingEngine:
         cwe: str,
         severity: str,
         remediation: str,
+        passive_tags: list[str] | None = None,
     ) -> Finding:
         assert obs.request is not None
         endpoint = obs.request.url
@@ -219,6 +221,7 @@ class PassiveFindingEngine:
                     f"1. Envoyer {obs.request.method} {endpoint}",
                     f"2. Observer la réponse : {description}",
                 ],
+                "passive_tags": passive_tags or [],
             },
             remediation_hint=remediation,
         )

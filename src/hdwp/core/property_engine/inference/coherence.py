@@ -28,6 +28,9 @@ BUSINESS_CRITICAL_NAMES = frozenset({
 class CoherenceInference:
     """Inférence des propriétés de cohérence et logique métier."""
 
+    def provider_id(self) -> str:
+        return "builtin.coherence"
+
     def infer(self, model: ApplicationModelData) -> list[SecurityProperty]:
         props: list[SecurityProperty] = []
         seen_names: set[str] = set()

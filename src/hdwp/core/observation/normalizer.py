@@ -59,11 +59,19 @@ def normalize_request(
     safe_headers = _redact_headers(headers or {})
     path_params = _extract_path_params(parsed.path)
 
+    # Decode form-encoded string bodies into structured dict
+    parsed_body = body
+    if isinstance(body, str) and "&" in body and "=" in body:
+        try:
+            parsed_body = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
+        except Exception:  # noqa: BLE001
+            parsed_body = body
+
     return NormalizedRequest(
         method=method.upper(),
         url=url,
         headers=safe_headers,
-        body=body,
+        body=parsed_body,
         query_params=query_params,
         path_params=path_params,
     )
@@ -79,7 +87,12 @@ def normalize_response(
     content_type = hdrs.get("content-type", hdrs.get("Content-Type"))
 
     parsed_body = body
-    if isinstance(body, (str, bytes)) and content_type and "application/json" in content_type:
+    has_json_ct = bool(content_type and "application/json" in content_type)
+    looks_like_json = isinstance(body, (str, bytes)) and (
+        (isinstance(body, str) and body.lstrip()[:1] in ("{", "["))
+        or (isinstance(body, bytes) and body.lstrip()[:1] in (b"{", b"["))
+    )
+    if isinstance(body, (str, bytes)) and (has_json_ct or looks_like_json):
         try:
             parsed_body = json.loads(body)
         except (json.JSONDecodeError, TypeError):

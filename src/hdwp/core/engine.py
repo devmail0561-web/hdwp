@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any, Self
 if TYPE_CHECKING:
     from hdwp.core.knowledge.base import KnowledgeBase
 
-import httpx
 import structlog
 
 from hdwp.core.bus.event_bus import AsyncEventBus
@@ -124,6 +123,7 @@ class HDWPEngine:
         bus: AsyncEventBus,
         db_url: str | None = None,
         plugin_ids: list[str] | None = None,
+        proxy_url: str | None = None,
     ) -> HDWPEngine:
         """Logique commune : initialise tous les composants depuis un context + bus."""
         from hdwp.core.paths import evidence_db_url
@@ -143,29 +143,65 @@ class HDWPEngine:
         for pid in enabled:
             registry.enable(pid)
 
-        # KnowledgeBase : charger les poids adAPes avant de creer le prioritizer
+        # Enregistrer les mutations custom des plugins
+        from hdwp.core import mutation_registry
+
+        for plugin in registry.list_enabled():
+            for mut_spec in plugin.register_mutations():
+                mutation_registry.register(**mut_spec)
+
+        # KnowledgeBase : charger les poids adaptés avant de créer le prioritizer
         from hdwp.core.hypothesis.prioritizer import HypothesisPrioritizer
-        from hdwp.core.knowledge.base import DEFAULT_KB_PATH, KnowledgeBase
+        from hdwp.core.knowledge.base import DEFAULT_KB_PATH, KnowledgeBase, classify_target
 
         kb_path = context.config.options.knowledge_db or DEFAULT_KB_PATH
         kb = KnowledgeBase(db_path=kb_path)
-        adapted_weights = await kb.get_adapted_weights()
+        url_target_type = classify_target(context.base_url)
+        adapted_weights = await kb.get_adapted_weights(target_type=url_target_type)
         prioritizer = HypothesisPrioritizer.with_weights(adapted_weights)
+        confidence_weights = await kb.get_confidence_weights()
+        app_model.set_confidence_weights(confidence_weights)
         session_count = await kb.get_session_count()
-        log.info("engine.knowledge_loaded", kb_path=str(kb_path), sessions=session_count)
+        log.info(
+            "engine.knowledge_loaded",
+            kb_path=str(kb_path),
+            sessions=session_count,
+            target_type=url_target_type,
+        )
 
-        # Composants de raisonnement (s'abonnent au bus a l'initialisation)
-        SecurityPropertyEngine(bus, plugin_registry=registry)
+        # LLM layer (créé AVANT HypothesisEngine et ObservationEngine pour injection)
+        from hdwp.core.llm.layer import create_llm_layer
+
+        llm_layer = create_llm_layer(context.config.llm)
+
+        # KB stats for adaptive inference confidence (aggregated across target_types)
+        raw_stats = await kb.get_stats()
+        kb_stats: dict[tuple[str, str], dict[str, float]] = {}
+        for s in raw_stats:
+            key = (s["property_type"], s["mutation_type"])
+            if key not in kb_stats:
+                kb_stats[key] = {"confirmed_rate": 0.0, "total": 0}
+            prev = kb_stats[key]
+            prev_total = prev["total"]
+            new_total = prev_total + s["total"]
+            if new_total > 0:
+                prev["confirmed_rate"] = (
+                    prev["confirmed_rate"] * prev_total + s["confirmed_rate"] * s["total"]
+                ) / new_total
+            prev["total"] = new_total
+
+        from hdwp.core.property_engine.inference_registry import InferenceRegistry
+
+        inference_reg = InferenceRegistry.default_with_kb_stats(kb_stats)
+        SecurityPropertyEngine(bus, plugin_registry=registry, inference_registry=inference_reg)
         hyp_engine = HypothesisEngine(
             bus,
             model_accessor=app_model.snapshot,
             plugin_registry=registry,
             repository=repository,
             prioritizer=prioritizer,
+            llm_layer=llm_layer,
         )
-        from hdwp.core.llm.layer import create_llm_layer
-
-        llm_layer = create_llm_layer(context.config.llm)
         oracle = SemanticOracle(bus, repository, llm_layer=llm_layer)
         PassiveFindingEngine(bus, repository)
         report_engine = ReportEngine(bus, repository)
@@ -175,7 +211,7 @@ class HDWPEngine:
 
         StateMachineLearner(bus)
 
-        obs_engine = ObservationEngine(bus, context, scope_guard)
+        obs_engine = ObservationEngine(bus, context, scope_guard, llm_layer=llm_layer, proxy_url=proxy_url)
 
         rate_limiter = TokenBucket.from_rpm(context.config.options.max_requests_per_minute)
         session_manager = SessionManager(context.config.roles)
@@ -196,8 +232,8 @@ class HDWPEngine:
         from hdwp.core.bus.events import CREDENTIALS_CAPTURED
         from hdwp.core.bus.events import HDWPEvent as _HDWPEvent
 
-        def _cred_handler(event: _HDWPEvent) -> None:
-            asyncio.create_task(_on_credentials_captured(event, session_manager))
+        async def _cred_handler(event: _HDWPEvent) -> None:
+            await _on_credentials_captured(event, session_manager)
 
         bus.on(CREDENTIALS_CAPTURED, _cred_handler)
 
@@ -208,6 +244,7 @@ class HDWPEngine:
             rate_limiter=rate_limiter,
             model_accessor=app_model.snapshot,
             corpus_accessor=app_model.get_all_corpus,
+            max_concurrent=context.config.options.max_concurrent_experiments,
         )
 
         return cls(
@@ -243,10 +280,11 @@ class HDWPEngine:
         bus: AsyncEventBus,
         db_url: str | None = None,
         plugin_ids: list[str] | None = None,
+        proxy_url: str | None = None,
     ) -> HDWPEngine:
         """Variante pour le TUI : accepte un bus et un context deja crees.
         Le bus est celui du proxy, partage avec le moteur."""
-        return await cls._init_components(context, bus, db_url, plugin_ids)
+        return await cls._init_components(context, bus, db_url, plugin_ids, proxy_url=proxy_url)
 
     async def run(self) -> list[Finding]:
         """Lance le pipeline complet et retourne les findings confirmes."""
@@ -265,6 +303,22 @@ class HDWPEngine:
         # Phase 1b : crawl actif
         await self._obs_engine.start()
         await self._bus.drain()
+
+        # Phase 1b-bis : scan des versions de bibliothèques JS/CSS (OWASP A06:2021)
+        try:
+            from hdwp.core.observation.version_scanner import scan_and_emit as _vs_scan
+            vs_count = await _vs_scan(
+                script_urls=self._obs_engine.collected_script_urls,
+                script_contents=self._obs_engine.collected_script_contents,
+                script_pages=self._obs_engine.collected_script_pages,
+                bus=self._bus,
+                repository=self._repository,
+            )
+            if vs_count > 0:
+                log.info("engine.version_scan_done", findings=vs_count)
+                await self._bus.drain()
+        except Exception as exc:
+            log.warning("engine.version_scan_failed", error=str(exc))
 
         # Phase 1c : auto-registration si moins de 2 roles authentifies
         if self._context.config.options.allow_write:
@@ -305,7 +359,10 @@ class HDWPEngine:
                 msg="Le modele a peu de couverture -- les hypotheses peuvent etre limitees",
             )
 
-        # Phase 2 : raisonnement + experiences
+        # Phase 2 : expériences en PARALLÈLE (corpus complet disponible après le crawl)
+        # run_pending() utilise un sémaphore pour limiter la concurrence (défaut : 3).
+        # C'est plus rapide que séquentiel car les hypothèses tournent simultanément,
+        # tout en garantissant un corpus complet pour que RequestSelector trouve des plans.
         pending = self._hyp_engine.get_pending()
         log.info("engine.hypotheses_ready", count=len(pending))
 
@@ -323,6 +380,7 @@ class HDWPEngine:
                 findings=findings,
                 session_id=self._context.session_id,
                 target_url=self._context.base_url,
+                model_snapshot=self._app_model.snapshot(),
             )
             sessions = await self._kb.get_session_count()
             log.info("engine.knowledge_updated", sessions=sessions, findings=len(findings))

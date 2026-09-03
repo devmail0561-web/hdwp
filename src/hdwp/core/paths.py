@@ -58,24 +58,38 @@ def build_context_from_url(target_url: str) -> Path:
     Si le fichier existe deja (meme hash), le reutilise sans reecrire."""
     path = context_path_for_url(target_url)
     if path.exists():
-        return path
+        content = path.read_text(encoding="utf-8")
+        # Régénérer si c'est un contexte auto-généré avec l'ancien défaut allow_write: false
+        if "# Contexte genere automatiquement" in content and "allow_write: false" in content:
+            path.unlink()
+        else:
+            return path
     parsed = urlparse(target_url)
     base = f"{parsed.scheme}://{parsed.netloc}"
     content = f"""# Contexte genere automatiquement par HDWP
+# ATTENTION : ce fichier est genere une seule fois. Modifiez-le pour ajouter des tokens.
 target:
   base_url: "{base}"
   name: "Pentest {parsed.netloc}"
 
 scope:
   include:
+    - "{base}"
     - "{base}/*"
 
+# Ajoutez des roles avec credentials pour les tests d'autorisation (BOLA, privilege escalation)
+# Exemple :
+#   - name: "user_a"
+#     credentials:
+#       type: bearer
+#       token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 roles:
   - name: "anonymous"
 
 options:
-  allow_write: false
-  max_requests_per_minute: 30
+  # allow_write: true permet les requetes POST/PUT/DELETE dans les experiences
+  allow_write: true
+  max_requests_per_minute: 60
 """
     path.write_text(content, encoding="utf-8")
     return path

@@ -6,9 +6,8 @@ from __future__ import annotations
 import pytest
 
 from hdwp.core.experiment.mutation_module import MutationModule
-from hdwp.core.experiment.request_selector import ConcreteExperimentPlan
 from hdwp.core.experiment.session_manager import SessionManager
-from hdwp.core.model.schemas import ExperimentSpec, NormalizedRequest
+from hdwp.core.model.schemas import ConcreteExperimentPlan, ExperimentSpec, NormalizedRequest
 from hdwp.core.context.config_schema import RoleConfig
 
 

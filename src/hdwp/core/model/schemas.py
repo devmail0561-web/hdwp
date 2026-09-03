@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal
 
@@ -152,6 +153,22 @@ class ExperimentSpec(BaseModel):
     description: str = ""
 
 
+@dataclass
+class ConcreteExperimentPlan:
+    """Plan d'experience resolu, pret pour l'execution HTTP."""
+
+    hypothesis_id: str
+    mutation_type: str
+    baseline_request: NormalizedRequest
+    baseline_role: str
+    target_role: str | None
+    mutated_value: str | None
+    mutated_param_name: str | None
+    mutated_param_location: str | None
+    description: str
+    experiment_spec: ExperimentSpec
+
+
 class Hypothesis(BaseModel):
     id: str = Field(default_factory=lambda: generate_id("HYP"))
     status: HypothesisStatus = HypothesisStatus.PENDING
@@ -217,3 +234,34 @@ class Finding(BaseModel):
     affected_endpoints: list[str] = Field(default_factory=list)
     proof: dict[str, Any] = Field(default_factory=dict)
     remediation_hint: str = ""
+
+
+# ── Flow Map schemas ─────────────────────────────────────────────────────────
+
+class FlowEdge(BaseModel):
+    from_endpoint: str
+    to_endpoint: str
+    trigger: Literal["link", "form", "ajax", "fsm", "redirect"] = "link"
+    params_transferred: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+
+
+class DBColumn(BaseModel):
+    name: str
+    type_hint: str = "string"
+    is_pk: bool = False
+    is_fk_to: str | None = None
+
+
+class DBTable(BaseModel):
+    name: str
+    columns: list[DBColumn] = Field(default_factory=list)
+    evidence_endpoints: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+
+
+class DataFlowMap(BaseModel):
+    edges: list[FlowEdge] = Field(default_factory=list)
+    db_tables: list[DBTable] = Field(default_factory=list)
+    exfiltration_risks: list[str] = Field(default_factory=list)
+    last_updated: str = ""

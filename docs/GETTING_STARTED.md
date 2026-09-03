@@ -141,12 +141,15 @@ hdwp run --context hdwp-context.yaml --hypothesis HYP-a1b2c3d4
 |---|---|
 | Crawl actif multi-rôle | Disponible |
 | Construction du modèle applicatif | Disponible |
-| Inférence de propriétés (AUTHORIZATION, CONFIDENTIALITY) | Disponible |
+| Inférence de propriétés (7 types) | Disponible |
 | Génération d'hypothèses | Disponible |
-| Exécution d'expériences (ExperimentEngine) | Phase 4 — en développement |
-| Oracle sémantique (findings) | Phase 4 — en développement |
-| Rapports (Markdown, JSON, HAR) | Phase 5 — à venir |
-| Mode proxy passif (mitmproxy) | Phase 6 — à venir |
+| Exécution d'expériences (ExperimentEngine) | Disponible |
+| Oracle sémantique (findings) | Disponible |
+| Apprentissage adaptatif inter-sessions | Disponible |
+| Rapports (Markdown, JSON, HAR) | Disponible |
+| LLM (désambiguïsation, hypothèses) | Disponible |
+| Mode proxy MITM intégré | Disponible |
+| Version scanning (CVE via OSV.dev) | Disponible |
 
 ---
 
@@ -222,7 +225,54 @@ mypy src/hdwp --strict
 
 ---
 
-## 10. Pour aller plus loin
+## 10. Configuration du Proxy MITM
+
+HDWP embarque un proxy MITM natif qui capture le trafic HTTP/HTTPS de votre navigateur pour récupérer les credentials et enrichir l'analyse. Il démarre automatiquement à chaque scan en mode **DÉCOUVERTE** (port `127.0.0.1:8080`).
+
+### Installation du certificat CA (une seule fois)
+
+Pour intercepter le HTTPS, les navigateurs doivent faire confiance au CA HDWP (`~/.hdwp/ca.crt`).
+
+**Installation automatique :**
+```bash
+# Depuis la CLI
+hdwp proxy install-ca
+
+# Ou depuis l'interface web — bouton "INSTALLER CERTIFICAT CA"
+# dans le panneau STATUS pendant un scan
+```
+
+Cette commande installe automatiquement le certificat dans :
+- Chrome (NSS `~/.pki/nssdb/`)
+- Firefox (profils snap et non-snap)
+- Store système Linux (`update-ca-certificates`)
+- Keychain macOS
+- Windows Certificate Store
+
+Elle nécessite `libnss3-tools` pour les profils NSS :
+```bash
+sudo apt install libnss3-tools   # Ubuntu/Debian
+```
+
+**Installation manuelle :**
+
+| Navigateur | Méthode |
+|-----------|---------|
+| Firefox | Paramètres → Vie privée → Certificats → Importer `~/.hdwp/ca.crt` |
+| Chrome | `chrome://settings/security` → Gérer les certificats → Autorités → Importer |
+| Système (Linux) | `sudo cp ~/.hdwp/ca.crt /usr/local/share/ca-certificates/hdwp.crt && sudo update-ca-certificates` |
+| macOS | `security add-trusted-cert -d -r trustRoot -k ~/Library/Keychains/login.keychain-db ~/.hdwp/ca.crt` |
+
+### Configuration du navigateur
+
+Configurez `127.0.0.1:8080` comme proxy HTTP/HTTPS dans votre navigateur avant de naviguer sur la cible.
+
+**Firefox** : Paramètres → Réseau → Paramètres de connexion → Proxy manuel  
+**Chrome/Chromium** : Utilise les paramètres proxy du système
+
+---
+
+## 11. Pour aller plus loin
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — architecture détaillée, composants, Event Bus, oracle de violation, modèle de confiance
 - [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md) — créer et packager un plugin HDWP

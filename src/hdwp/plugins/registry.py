@@ -20,11 +20,35 @@ class PluginRegistry:
     def __init__(self) -> None:
         self._plugins: dict[str, HDWPPlugin] = {}
         self._enabled: set[str] = set()
+        self._sources: dict[str, str] = {}
 
     def discover(self) -> None:
         """Discover plugins via importlib entry_points and ~/.hdwp/plugins/."""
         self._discover_entry_points()
         self._discover_user_plugins()
+        self._load_config()
+
+    def _config_path(self):  # type: ignore[return]
+        from hdwp.core.paths import HDWP_HOME
+        return HDWP_HOME / "plugins_config.json"
+
+    def _load_config(self) -> None:
+        import json
+        p = self._config_path()
+        if not p.exists():
+            self._enabled = set(self._plugins.keys())
+            return
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            self._enabled = set(data.get("enabled", list(self._plugins.keys())))
+        except Exception:
+            self._enabled = set(self._plugins.keys())
+
+    def _save_config(self) -> None:
+        import json
+        p = self._config_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"enabled": sorted(self._enabled)}, indent=2), encoding="utf-8")
 
     def _discover_entry_points(self) -> None:
         """Discover plugins via importlib entry_points."""
@@ -35,6 +59,7 @@ class PluginRegistry:
                     plugin_class = ep.load()
                     plugin = plugin_class()
                     self._plugins[plugin.id] = plugin
+                    self._sources[plugin.id] = "builtin"
                     logger.debug("plugin.discovered", plugin_id=plugin.id)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -72,6 +97,7 @@ class PluginRegistry:
                         continue
                     plugin = plugin_class()
                     self._plugins[plugin.id] = plugin
+                    self._sources[plugin.id] = "user"
                     logger.debug(
                         "plugin.user_discovered",
                         plugin_id=plugin.id,
@@ -98,11 +124,16 @@ class PluginRegistry:
     def enable(self, plugin_id: str) -> bool:
         if plugin_id in self._plugins:
             self._enabled.add(plugin_id)
+            self._save_config()
             return True
         return False
 
     def disable(self, plugin_id: str) -> None:
         self._enabled.discard(plugin_id)
+        self._save_config()
+
+    def source_of(self, plugin_id: str) -> str:
+        return self._sources.get(plugin_id, "builtin")
 
     def get(self, plugin_id: str) -> HDWPPlugin | None:
         return self._plugins.get(plugin_id)

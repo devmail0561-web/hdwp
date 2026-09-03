@@ -27,6 +27,12 @@ HYPOTHESIS_EXPERIMENTS_READY = "hypothesis.experiments_ready"
 # Emis par ProxyCapture quand un token d'authentification est capturé dans le trafic proxy.
 # Payload : {"token_type": str, "token_value": str, "role_name": str, "source_url": str}
 CREDENTIALS_CAPTURED = "credentials.captured"
+# Emis par FlowMapBuilder quand le flow map est reconstruit.
+# Payload : DataFlowMap.model_dump()
+FLOW_UPDATED = "flow.updated"
+# Emis par ApplicationModel quand un endpoint nécessite une authentification non configurée.
+# Payload : {"url": str, "path_pattern": str}
+AUTH_REQUIRED = "auth.required"
 
 ALL_EVENT_TYPES = [
     OBSERVATION_RAW,
@@ -42,6 +48,8 @@ ALL_EVENT_TYPES = [
     FINDING_REFUTED,
     REPORT_GENERATED,
     HYPOTHESIS_EXPERIMENTS_READY,
+    FLOW_UPDATED,
+    AUTH_REQUIRED,
     CREDENTIALS_CAPTURED,
 ]
 

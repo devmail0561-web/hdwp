@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #020c0a;
+  --bg-panel:   #010e08;
+  --bg-input:   #031a10;
+  --green:      #00ff88;
+  --green-dim:  #00aa55;
+  --green-dark: #006633;
+  --red:        #ff0066;
+  --red-soft:   #ff4488;
+  --amber:      #ffaa00;
+  --cyan:       #00ccff;
+  --text:       #00cc66;
+  --text-hl:    #00ff88;
+  --border:     #00ff4422;
+  --border-hi:  #00ff4455;
+  --font-title: 'Orbitron', monospace;
+  --font-mono:  'Share Tech Mono', monospace;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: #000;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+@keyframes blink {
+  0%, 100% { opacity: 1 }
+  50% { opacity: 0.15 }
+}
+
+@keyframes phase-pulse {
+  0%, 100% { border-color: #00ff4444; color: var(--green); }
+  50% { border-color: #00ff4488; color: #44ff88; }
+}
+
+@keyframes glow-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scan-sweep {
+  0%   { background-position: 0 -100%; }
+  100% { background-position: 0 200%; }
+}
+
+button { font-family: var(--font-title); }
+button:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
+
+input:focus { border-color: var(--green) !important; }
+
+::selection {
+  background: #00ff4433;
+  color: var(--green);
+}

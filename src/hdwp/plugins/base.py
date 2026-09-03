@@ -28,6 +28,10 @@ class HDWPPlugin(ABC):
     def category(self) -> str: ...
 
     @property
+    def description(self) -> str:
+        return ""
+
+    @property
     def owasp_mapping(self) -> list[str]:
         return []
 
@@ -55,3 +59,13 @@ class HDWPPlugin(ABC):
     @abstractmethod
     def generate_hypotheses(self, model: ApplicationModelData) -> list[Hypothesis]:
         ...
+
+    def register_mutations(self) -> list[dict]:
+        """Enregistrer des mutations custom dans le MutationRegistry.
+
+        Retourne une liste de dicts pour mutation_registry.register().
+        Chaque dict doit contenir : name, owasp_category, cwe_id, remediation,
+        et optionnellement : assess_violation, compute_specificity,
+        plan_experiment, apply_mutation.
+        """
+        return []

@@ -69,8 +69,14 @@ async def test_generates_hypothesis_from_authorization_property() -> None:
 
 @pytest.mark.asyncio
 async def test_generates_hypothesis_from_role_separation_property() -> None:
+    from hdwp.core.model.schemas import ApplicationModelData, EndpointNode, RoleNode
+
+    model = ApplicationModelData(
+        endpoints=[EndpointNode(id="ROLE-1", path="/admin", methods=["GET"])],
+        roles=[RoleNode(id="ROLE-1", name="admin"), RoleNode(id="ROLE-2", name="user")],
+    )
     bus = AsyncEventBus()
-    engine = HypothesisEngine(bus)
+    engine = HypothesisEngine(bus, model_accessor=lambda: model)
 
     received: list[HDWPEvent] = []
     bus.on(HYPOTHESIS_GENERATED, lambda e: received.append(e))

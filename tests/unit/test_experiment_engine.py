@@ -14,10 +14,11 @@ from hdwp.core.context.loader import EngineContext
 from hdwp.core.context.scope_guard import ScopeGuard
 from hdwp.core.experiment.engine import ExperimentEngine
 from hdwp.core.experiment.rate_limiter import TokenBucket
-from hdwp.core.experiment.request_selector import ConcreteExperimentPlan, RequestSelector
+from hdwp.core.experiment.request_selector import RequestSelector
 from hdwp.core.experiment.session_manager import SessionManager
 from hdwp.core.model.schemas import (
     ApplicationModelData,
+    ConcreteExperimentPlan,
     ExperimentSpec,
     Hypothesis,
     NormalizedRequest,

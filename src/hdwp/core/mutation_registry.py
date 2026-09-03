@@ -14,8 +14,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import structlog
+
 if TYPE_CHECKING:
+    from hdwp.core.experiment.mutation_types import ApplyFunction, PlanFunction
+    from hdwp.core.experiment.session_manager import SessionManager
+    from hdwp.core.model.schemas import (
+        ApplicationModelData,
+        ConcreteExperimentPlan,
+        ExperimentSpec,
+        Hypothesis,
+        NormalizedRequest,
+    )
     from hdwp.core.oracle.violation_oracle import ViolationAssessment
+
+log = structlog.get_logger()
 
 
 @dataclass
@@ -30,6 +43,10 @@ class MutationSpec:
     assess_violation: Callable[..., ViolationAssessment] = field(repr=False)
     # Le callable recoid (mutation_type, diff, experiment, assessment) -> float
     compute_specificity: Callable[..., float] = field(repr=False)
+    # Planification : (hypothesis, spec, model, corpus) -> list[ConcreteExperimentPlan]
+    plan_experiment: PlanFunction | None = field(default=None, repr=False)
+    # Application : (plan, session_manager) -> NormalizedRequest
+    apply_mutation: ApplyFunction | None = field(default=None, repr=False)
 
 
 # Forward reference pour eviter les imports circulaires
@@ -37,7 +54,7 @@ _violation_assessors: dict[str, Callable[..., object]] = {}
 _specificity_computers: dict[str, Callable[..., float]] = {}
 
 
-def _lazy_assess(name: str, baseline: object, experiment: object, diff: object) -> object:
+def _lazy_assess(name: str, baseline: object, experiment: object, diff: object) -> ViolationAssessment:
     """Assess violation en lazy-loadant les assesseurs."""
     if not _violation_assessors:
         from hdwp.core.oracle.violation_oracle import (
@@ -61,11 +78,11 @@ def _lazy_assess(name: str, baseline: object, experiment: object, diff: object) 
         )
     assessor = _violation_assessors.get(name)
     if assessor is not None:
-        return assessor(baseline, experiment, diff)
+        return assessor(baseline, experiment, diff)  # type: ignore[no-any-return]
     # Fallback generic
     from hdwp.core.oracle.violation_oracle import _assess_generic
 
-    return _assess_generic(diff)
+    return _assess_generic(diff)  # type: ignore[arg-type]
 
 
 def _lazy_specificity(
@@ -94,7 +111,7 @@ def _lazy_specificity(
         )
     computer = _specificity_computers.get(name)
     if computer is not None:
-        return computer(diff, experiment, assessment)  # type: ignore[no-any-return]
+        return computer(diff, experiment, assessment)
     return 0.6 if hasattr(diff, "verdict") else 0.3
 
 
@@ -108,10 +125,18 @@ def register(
     owasp_category: str,
     cwe_id: str,
     remediation: str,
-    assess_violation: Callable[..., object] | None = None,
+    assess_violation: Callable[..., ViolationAssessment] | None = None,
     compute_specificity: Callable[..., float] | None = None,
+    plan_experiment: PlanFunction | None = None,
+    apply_mutation: ApplyFunction | None = None,
 ) -> None:
     """Enregistre un type de mutation dans le registry."""
+    if name in _MUTATIONS:
+        log.warning("mutation.override", name=name)
+    if plan_experiment is not None and not callable(plan_experiment):
+        raise TypeError(f"plan_experiment must be callable, got {type(plan_experiment)}")
+    if apply_mutation is not None and not callable(apply_mutation):
+        raise TypeError(f"apply_mutation must be callable, got {type(apply_mutation)}")
     _MUTATIONS[name] = MutationSpec(
         name=name,
         owasp_category=owasp_category,
@@ -120,13 +145,15 @@ def register(
         assess_violation=(
             assess_violation
             if assess_violation is not None
-            else lambda b, e, d: _lazy_assess(name, b, e, d)
+            else lambda b, e, d: _lazy_assess(name, b, e, d)  # type: ignore[no-any-return]
         ),
         compute_specificity=(
             compute_specificity
             if compute_specificity is not None
             else lambda mt, d, e, a: _lazy_specificity(mt, d, e, a)
         ),
+        plan_experiment=plan_experiment,
+        apply_mutation=apply_mutation,
     )
 
 
@@ -170,55 +197,130 @@ def specificity(name: str, diff: object, experiment: object, assessment: object)
     return _lazy_specificity(name, diff, experiment, assessment)
 
 
+def plan(
+    name: str,
+    hypothesis: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """Planifie les experiences pour une mutation donnee."""
+    entry = _MUTATIONS.get(name)
+    if entry is not None and entry.plan_experiment is not None:
+        return entry.plan_experiment(hypothesis, spec, model, corpus)
+    log.warning("mutation.no_planner", mutation_type=name)
+    return []
+
+
+def apply(
+    name: str,
+    concrete_plan: ConcreteExperimentPlan,
+    session_manager: SessionManager,
+) -> NormalizedRequest | None:
+    """Applique une mutation a un plan d'experience."""
+    entry = _MUTATIONS.get(name)
+    if entry is not None and entry.apply_mutation is not None:
+        return entry.apply_mutation(concrete_plan, session_manager)
+    log.warning("mutation.no_applier", mutation_type=name)
+    return None
+
+
 # ── Enregistrement des mutations integrees ──────────────────────────────────
+
 
 def _register_builtins() -> None:
     """Enregistre toutes les mutations hard-codees existantes."""
     if _MUTATIONS:
         return  # deja enregistrees
 
-    register(
-        name="identity_swap",
-        owasp_category="A01:2021",
-        cwe_id="CWE-639",
-        remediation=(
-            "Verifier l'ownership de la ressource cote serveur "
-            "avant de retourner les donnees."
-        ),
-    )
-    register(
-        name="object_ref_change",
-        owasp_category="A01:2021",
-        cwe_id="CWE-639",
-        remediation=(
-            "Verifier l'ownership de la ressource cote serveur "
-            "avant de retourner les donnees."
-        ),
-    )
-    register(
-        name="privilege_escalation",
-        owasp_category="A01:2021",
-        cwe_id="CWE-284",
-        remediation="Implementer un controle de role explicite sur cet endpoint.",
-    )
-    register(
-        name="field_injection",
-        owasp_category="A03:2021",
-        cwe_id="CWE-89",
-        remediation="Valider et echapper toutes les entrees utilisateur cote serveur.",
-    )
-    register(
-        name="jwt_manipulation",
-        owasp_category="A02:2021",
-        cwe_id="CWE-347",
-        remediation="Valider le token JWT avec un algorithme fixe et verifie la signature.",
-    )
-    register(
-        name="origin_test",
-        owasp_category="A05:2021",
-        cwe_id="CWE-942",
-        remediation="Restreindre Access-Control-Allow-Origin aux domaines de confiance.",
-    )
+    # Metadonnees statiques : toujours enregistrees, meme si les imports echouent.
+    # Les fonctions plan/apply sont chargees dynamiquement dans le bloc try ci-dessous.
+    # Cela garantit que assess/specificity/remediation fonctionnent meme sans plan/apply.
+    _metadata: list[dict[str, object]] = [
+        {
+            "name": "identity_swap",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-639",
+            "remediation": (
+                "Verifier l'ownership de la ressource cote serveur "
+                "avant de retourner les donnees."
+            ),
+        },
+        {
+            "name": "object_ref_change",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-639",
+            "remediation": (
+                "Verifier l'ownership de la ressource cote serveur "
+                "avant de retourner les donnees."
+            ),
+        },
+        {
+            "name": "privilege_escalation",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-284",
+            "remediation": "Implementer un controle de role explicite sur cet endpoint.",
+        },
+        {
+            "name": "field_injection",
+            "owasp_category": "A03:2021",
+            "cwe_id": "CWE-89",
+            "remediation": "Valider et echapper toutes les entrees utilisateur cote serveur.",
+        },
+        {
+            "name": "jwt_manipulation",
+            "owasp_category": "A02:2021",
+            "cwe_id": "CWE-347",
+            "remediation": "Valider le token JWT avec un algorithme fixe et verifie la signature.",
+        },
+        {
+            "name": "origin_test",
+            "owasp_category": "A05:2021",
+            "cwe_id": "CWE-942",
+            "remediation": "Restreindre Access-Control-Allow-Origin aux domaines de confiance.",
+        },
+    ]
+    for meta in _metadata:
+        try:
+            register(**meta)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("mutation.builtin_register_failed", name=meta.get("name"), error=str(exc))
+
+    # Enrichissement avec plan/apply : isolation par import, chaque mutation independante.
+    try:
+        from hdwp.core.experiment.mutation_module import (
+            apply_field_injection,
+            apply_identity_swap,
+            apply_jwt_manipulation,
+            apply_object_ref_change,
+            apply_origin_test,
+            apply_privilege_escalation,
+        )
+        from hdwp.core.experiment.request_selector import (
+            plan_field_injection,
+            plan_identity_swap,
+            plan_jwt_manipulation,
+            plan_object_ref_change,
+            plan_origin_test,
+            plan_privilege_escalation,
+        )
+
+        _plan_apply: list[tuple[str, object, object]] = [
+            ("identity_swap",        plan_identity_swap,        apply_identity_swap),
+            ("object_ref_change",    plan_object_ref_change,    apply_object_ref_change),
+            ("privilege_escalation", plan_privilege_escalation, apply_privilege_escalation),
+            ("field_injection",      plan_field_injection,      apply_field_injection),
+            ("jwt_manipulation",     plan_jwt_manipulation,     apply_jwt_manipulation),
+            ("origin_test",          plan_origin_test,          apply_origin_test),
+        ]
+        for mut_name, plan_fn, apply_fn in _plan_apply:
+            entry = _MUTATIONS.get(mut_name)
+            if entry is not None:
+                # MutationSpec n'est pas frozen : mise a jour directe
+                entry.plan_experiment = plan_fn  # type: ignore[assignment]
+                entry.apply_mutation = apply_fn  # type: ignore[assignment]
+    except ImportError as exc:
+        log.warning("mutation.builtins_plan_apply_import_failed", error=str(exc))
 
 
 # Auto-enregistrement a l'import

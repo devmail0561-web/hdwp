@@ -1,0 +1,146 @@
+# Copyright (c) 2026 M. TENDENG
+# Licensed under the MIT License. See LICENSE file for details.
+
+"""Lance le serveur FastAPI et ouvre la fenêtre pywebview (ou le navigateur)."""
+from __future__ import annotations
+
+import threading
+import time
+import urllib.parse
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import httpx
+import structlog
+
+if TYPE_CHECKING:
+    pass
+
+log = structlog.get_logger()
+
+_PORT = 7860
+_HOST = "127.0.0.1"
+
+
+def _load_env_file() -> None:
+    """Charge ~/.hdwp/.env dans os.environ (format KEY=VALUE, ignore # et lignes vides)."""
+    import os
+
+    env_path = Path.home() / ".hdwp" / ".env"
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text().splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" in stripped:
+            k, v = stripped.split("=", 1)
+            key, val = k.strip(), v.strip()
+            if key and key not in os.environ:
+                os.environ[key] = val
+                log.debug("env.loaded", key=key)
+
+
+def _setup_proxy() -> None:
+    """
+    Configuration complète du proxy au démarrage — exécutée dans le terminal.
+    1. Installe certutil (libnss3-tools) si absent — sudo fonctionne ici
+    2. Génère le certificat CA (~/.hdwp/ca.crt) si absent
+    3. Installe le CA dans tous les navigateurs et le store système
+    Silencieux si tout est déjà en place.
+    """
+    try:
+        from hdwp.core.observation.ca_installer import ensure_certutil, install_ca_everywhere
+        from hdwp.core.observation.hdwp_proxy import CA_CERT_PATH, _load_or_create_ca
+
+        # Étape 1 : certutil (libnss3-tools)
+        ensure_certutil()
+
+        # Étape 2 : CA
+        _load_or_create_ca()
+
+        # Étape 3 : installation dans les navigateurs (certutil dispo + sudo disponible ici)
+        if CA_CERT_PATH.exists():
+            results = install_ca_everywhere(CA_CERT_PATH)
+            ok = [k for k, v in results.items() if v.get("ok")]
+            if ok:
+                log.info("proxy.ca_installed_on_startup", browsers=ok)
+    except Exception as exc:
+        log.debug("proxy.setup_error", error=str(exc))
+
+
+def start_native_app(
+    context_path: Path | None = None,
+    db_url: str | None = None,
+    auto_start_url: str | None = None,
+) -> None:
+    """Lance le serveur FastAPI + ouvre la fenêtre native (pywebview ou navigateur)."""
+    _load_env_file()
+    _setup_proxy()   # tout-en-un : certutil + CA + install navigateurs
+    server_thread = threading.Thread(target=_run_uvicorn, daemon=True)
+    server_thread.start()
+
+    health_url = f"http://{_HOST}:{_PORT}/api/health"
+    if not _wait_for_health(health_url, timeout=10.0):
+        raise RuntimeError(
+            f"Le serveur HDWP n'a pas démarré en 10s sur {_HOST}:{_PORT}. "
+            "Vérifiez que le port n'est pas occupé."
+        )
+
+    startup_url = f"http://{_HOST}:{_PORT}"
+    if auto_start_url:
+        startup_url += f"?target={urllib.parse.quote(auto_start_url, safe='')}"
+
+    log.info("launcher.ready", url=startup_url)
+    _open_window(startup_url)
+
+
+def _run_uvicorn() -> None:
+    import uvicorn
+    uvicorn.run(
+        "hdwp.server.app:create_app",
+        factory=True,
+        host=_HOST,
+        port=_PORT,
+        log_level="warning",
+        access_log=False,
+    )
+
+
+def _wait_for_health(url: str, timeout: float = 10.0) -> bool:
+    """Boucle retry 100ms — robuste vs time.sleep() arbitraire."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            resp = httpx.get(url, timeout=0.5)
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.1)
+    return False
+
+
+def _open_window(url: str) -> None:
+    """Ouvre pywebview (natif) ou le navigateur système comme fallback."""
+    try:
+        import pywebview  # type: ignore[import-untyped]
+        pywebview.create_window(
+            "HDWP Engine",
+            url,
+            width=1440,
+            height=900,
+            min_size=(1024, 600),
+        )
+        # pywebview.start() DOIT être appelé depuis le thread principal (macOS/Windows)
+        pywebview.start()
+    except ImportError:
+        log.warning("launcher.pywebview_not_installed", fallback="browser")
+        import webbrowser
+        webbrowser.open(url)
+        # Garder le thread principal vivant jusqu'à Ctrl+C
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass

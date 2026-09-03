@@ -9,10 +9,11 @@ import pytest
 
 from hdwp.core.bus.event_bus import AsyncEventBus
 from hdwp.core.bus.events import OBSERVATION_RAW
-from hdwp.core.experiment.request_selector import ConcreteExperimentPlan, RequestSelector
+from hdwp.core.experiment.request_selector import RequestSelector
 from hdwp.core.model.application_model import ApplicationModel
 from hdwp.core.model.schemas import (
     ApplicationModelData,
+    ConcreteExperimentPlan,
     ExperimentSpec,
     Hypothesis,
     NormalizedRequest,

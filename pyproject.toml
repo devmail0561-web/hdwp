@@ -22,12 +22,15 @@ dependencies = [
     "pydantic>=2.10",
     "rich>=13.0",
     "structlog>=24.0",
-    "textual>=0.60",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]
 proxy = ["mitmproxy>=12.0"]
 llm = ["anthropic>=0.40", "openai>=1.0"]
+native = ["pywebview>=5.0"]
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=0.24",
@@ -50,8 +53,29 @@ hdwp = "hdwp.cli.main:app"
 "core.information_flow.ssrf" = "hdwp.plugins.core.information_flow.ssrf:SSRFPlugin"
 "core.business_invariant.race_condition" = "hdwp.plugins.core.business_invariant.race_condition:RaceConditionPlugin"
 
+[project.entry-points."hdwp.inference"]
+authorization   = "hdwp.core.property_engine.inference.authorization:AuthorizationInference"
+confidentiality = "hdwp.core.property_engine.inference.confidentiality:ConfidentialityInference"
+state           = "hdwp.core.property_engine.inference.state:StateInference"
+integrity       = "hdwp.core.property_engine.inference.integrity:IntegrityInference"
+coherence       = "hdwp.core.property_engine.inference.coherence:CoherenceInference"
+temporal        = "hdwp.core.property_engine.inference.temporal:TemporalInference"
+concurrency     = "hdwp.core.property_engine.inference.concurrency:ConcurrencyInference"
+
+[project.entry-points."hdwp.mutations"]
+identity_swap        = "hdwp.core.experiment.request_selector:plan_identity_swap"
+object_ref_change    = "hdwp.core.experiment.request_selector:plan_object_ref_change"
+privilege_escalation = "hdwp.core.experiment.request_selector:plan_privilege_escalation"
+field_injection      = "hdwp.core.experiment.request_selector:plan_field_injection"
+jwt_manipulation     = "hdwp.core.experiment.request_selector:plan_jwt_manipulation"
+origin_test          = "hdwp.core.experiment.request_selector:plan_origin_test"
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/hdwp"]
+artifacts = ["src/hdwp/app/dist/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

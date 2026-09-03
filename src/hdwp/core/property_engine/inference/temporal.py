@@ -24,6 +24,9 @@ from hdwp.core.model.schemas import (
 class TemporalInference:
     """Infers temporal properties from the application model."""
 
+    def provider_id(self) -> str:
+        return "builtin.temporal"
+
     def infer(self, model: ApplicationModelData) -> list[SecurityProperty]:
         props: list[SecurityProperty] = []
 

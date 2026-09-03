@@ -22,6 +22,7 @@ from hdwp.core.model.schemas import (
 )
 
 if TYPE_CHECKING:
+    from hdwp.core.llm.layer import LLMLayerProtocol
     from hdwp.plugins.registry import PluginRegistry
     from hdwp.store.repository import Repository
 
@@ -42,6 +43,7 @@ class HypothesisEngine:
         plugin_registry: PluginRegistry | None = None,
         repository: Repository | None = None,
         prioritizer: HypothesisPrioritizer | None = None,
+        llm_layer: LLMLayerProtocol | None = None,
     ) -> None:
         self._bus = bus
         self._hypotheses: dict[str, Hypothesis] = {}
@@ -49,6 +51,7 @@ class HypothesisEngine:
         self._model_accessor = model_accessor
         self._plugin_registry = plugin_registry
         self._repository = repository
+        self._llm_layer = llm_layer
         bus.on(PROPERTY_INFERRED, self._on_property_inferred)
 
     async def _on_property_inferred(self, event: HDWPEvent) -> None:
@@ -71,6 +74,26 @@ class HypothesisEngine:
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("plugin.generate_hypotheses_failed", plugin_id=plugin.id, error=str(exc))
 
+        # LLM complementary hypotheses (ADR-002 : informationnelles, required_experiments=[])
+        if self._llm_layer is not None and self._model_accessor is not None:
+            model = self._model_accessor()
+            if model is not None:
+                try:
+                    statements = await self._llm_layer.propose_hypotheses(model, len(self._hypotheses))
+                    for stmt in statements:
+                        hyp = Hypothesis(
+                            source_plugin="llm",
+                            property_id=prop.id,
+                            statement=stmt,
+                            priority="LOW",
+                            priority_rationale="LLM complementary hypothesis — ADR-002",
+                            required_experiments=[],
+                        )
+                        if not self._is_duplicate(hyp):
+                            hypotheses.append(hyp)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("llm.propose_hypotheses_error", error=str(exc))
+
         for hyp in hypotheses:
             if not self._is_duplicate(hyp):
                 self._hypotheses[hyp.id] = hyp
@@ -88,7 +111,9 @@ class HypothesisEngine:
 
         if prop.type == PropertyType.AUTHORIZATION:
             stmt_lower = prop.formal_statement.lower()
-            if "parameter" in stmt_lower or "access(s, resource)" in stmt_lower:
+            if ("parameter" in stmt_lower or "access(s, resource)" in stmt_lower
+                    or "bola" in stmt_lower or "ownership" in stmt_lower
+                    or "object level" in stmt_lower):
                 priority, rationale = self._prioritizer.compute_priority(
                     property_type=prop.type,
                     affected_node_count=len(prop.model_nodes),
@@ -135,29 +160,44 @@ class HypothesisEngine:
                     total_endpoints=max(len(prop.model_nodes), 1),
                     observation_count=len(prop.source_observations),
                 )
-                hypotheses.append(
-                    Hypothesis(
-                        source_plugin="core.hypothesis_engine",
-                        property_id=prop.id,
-                        statement=(
-                            f"The property '{prop.formal_statement}' can be violated "
-                            "by using a lower-privilege role's credentials on a restricted endpoint."
-                        ),
-                        priority=priority,
-                        priority_rationale=rationale,
-                        required_experiments=[
-                            ExperimentSpec(
-                                mutation_type="privilege_escalation",
-                                base_request=NormalizedRequest(method="GET", url=""),
-                                mutation_params={
-                                    "property_id": prop.id,
-                                    "model_nodes": prop.model_nodes,
-                                },
-                                description="Access restricted endpoint with unauthorized role",
+                # Derive endpoint_path and target_role from model snapshot
+                if self._model_accessor is None:
+                    return hypotheses
+                model = self._model_accessor()
+                endpoint_path = ""
+                for ep in model.endpoints:
+                    if any(n in prop.model_nodes for n in ([ep.id] + ep.parameters)):
+                        endpoint_path = ep.path
+                        break
+                # Pick least-privileged role as attacker
+                role_names = [r.name for r in model.roles]
+                target_role = "anonymous" if "anonymous" in role_names else (role_names[0] if role_names else "anonymous")
+                if endpoint_path:
+                    hypotheses.append(
+                        Hypothesis(
+                            source_plugin="core.hypothesis_engine",
+                            property_id=prop.id,
+                            statement=(
+                                f"The property '{prop.formal_statement}' can be violated "
+                                "by using a lower-privilege role's credentials on a restricted endpoint."
                             ),
-                        ],
+                            priority=priority,
+                            priority_rationale=rationale,
+                            required_experiments=[
+                                ExperimentSpec(
+                                    mutation_type="privilege_escalation",
+                                    base_request=NormalizedRequest(method="GET", url=""),
+                                    mutation_params={
+                                        "property_id": prop.id,
+                                        "endpoint_path": endpoint_path,
+                                        "target_role": target_role,
+                                        "model_nodes": prop.model_nodes,
+                                    },
+                                    description=f"Access '{endpoint_path}' with role '{target_role}'",
+                                ),
+                            ],
+                        )
                     )
-                )
 
         elif prop.type == PropertyType.INTEGRITY:
             param_name = self._extract_param_name(prop.formal_statement)

@@ -208,6 +208,15 @@ class Repository:
             rows = result.scalars().all()
             return [Finding.model_validate_json(r.data_json) for r in rows]
 
+    async def get_experiment(self, experiment_id: str) -> ExperimentResult | None:
+        from hdwp.core.model.schemas import ExperimentResult
+
+        async with await self._session() as session:
+            record = await session.get(ExperimentRecord, experiment_id)
+            if record is None:
+                return None
+            return ExperimentResult.model_validate_json(record.data_json)
+
     # ── model snapshots ───────────────────────────────────────
 
     async def save_model_snapshot(self, snapshot_id: str, data_json: str) -> None:

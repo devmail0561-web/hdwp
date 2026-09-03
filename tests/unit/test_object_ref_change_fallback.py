@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from hdwp.core.experiment.request_selector import RequestSelector
+from hdwp.core.experiment.request_selector import RequestSelector, fallback_probe_values
 from hdwp.core.model.schemas import (
     ApplicationModelData,
     ExperimentSpec,
@@ -110,21 +110,18 @@ async def test_cross_role_prioritised_over_fallback() -> None:
 
 @pytest.mark.asyncio
 async def test_probe_values_do_not_include_current_value() -> None:
-    selector = RequestSelector()
-    probes = selector._fallback_probe_values("42")
+    probes = fallback_probe_values("42")
     assert "42" not in probes
 
 
 @pytest.mark.asyncio
 async def test_probe_values_max_three() -> None:
-    selector = RequestSelector()
-    probes = selector._fallback_probe_values("100")
+    probes = fallback_probe_values("100")
     assert len(probes) <= 3
 
 
 @pytest.mark.asyncio
 async def test_probe_values_for_id_1_excludes_zero_and_negatives() -> None:
-    selector = RequestSelector()
-    probes = selector._fallback_probe_values("1")
+    probes = fallback_probe_values("1")
     for v in probes:
         assert int(v) > 0

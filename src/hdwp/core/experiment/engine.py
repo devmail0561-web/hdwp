@@ -14,6 +14,7 @@ For each pending hypothesis (HIGH priority first):
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -62,6 +63,7 @@ class ExperimentEngine:
         rate_limiter: TokenBucket,
         model_accessor: Callable[[], ApplicationModelData | None],
         corpus_accessor: Callable[[], dict[str, list[tuple[str, NormalizedRequest]]]],
+        max_concurrent: int = 3,
     ) -> None:
         self._bus = bus
         self._scope_guard = scope_guard
@@ -73,10 +75,15 @@ class ExperimentEngine:
         self._mutator = MutationModule()
         self._temporal = TemporalModule()
         self._results_buffer: dict[str, list[ExperimentResult]] = {}
-
+        # Semaphore: limite les expériences concurrentes pour ne pas flood la cible
+        self._semaphore = asyncio.Semaphore(max_concurrent)
     async def run_pending(self, hypotheses: list[Hypothesis]) -> None:
-        """Execute all hypotheses in priority order (HIGH → LOW)."""
-        for hyp in hypotheses:
+        """Execute all hypotheses concurrently, limited by semaphore.
+        Appelé APRÈS le crawl pour garantir un corpus complet (évite les plans vides)."""
+        await asyncio.gather(*[self._run_with_semaphore(hyp) for hyp in hypotheses])
+
+    async def _run_with_semaphore(self, hyp: Hypothesis) -> None:
+        async with self._semaphore:
             await self._run_hypothesis(hyp)
 
     async def _run_hypothesis(self, hyp: Hypothesis) -> None:

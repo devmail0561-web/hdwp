@@ -232,7 +232,7 @@ def _assess_cors(
         if not baseline_acao:
             return ViolationAssessment(
                 verdict=ViolationVerdict.CONFIRMED,
-                rationale=f"CORS reflection vulnérable : origine malveillante acceptée",
+                rationale="CORS reflection vulnérable : origine malveillante acceptée",
                 confidence_hint=0.95,
             )
         return ViolationAssessment(

@@ -12,7 +12,9 @@ import structlog
 
 from hdwp.core.bus.event_bus import AsyncEventBus
 from hdwp.core.bus.events import (
+    AUTH_REQUIRED,
     FINDING_REFUTED,
+    FLOW_UPDATED,
     FSM_UPDATED,
     MODEL_UPDATED,
     OBSERVATION_RAW,
@@ -57,6 +59,16 @@ class ApplicationModel:
         # FSM apprise par StateMachineLearner
         self._fsm: ApplicationFSM | None = None
 
+        # Flow map builder
+        from hdwp.core.model.flow_map_builder import FlowMapBuilder
+        self._flow_builder = FlowMapBuilder()
+        self._last_flow_map = None
+        self._obs_count: int = 0
+        self._prev_fsm_changed: bool = False
+        self._auth_notified: set[str] = set()
+
+        self._confidence_weights: dict[str, float] = {"ep": 0.4, "role": 0.4, "bola": 0.2}
+
         bus.on(OBSERVATION_RAW, self._on_observation)
         bus.on(FINDING_REFUTED, self._on_finding_refuted)
         bus.on(FSM_UPDATED, self._on_fsm_updated)
@@ -75,6 +87,11 @@ class ApplicationModel:
 
         self._store_in_corpus(obs)
 
+        # Flow map: track referrer edges and count observations
+        _current_path = self._normalize_path(obs.request.url)
+        self._flow_builder.add_observation(obs, _current_path)
+        self._obs_count += 1
+
         # Extraire les liens depuis le body JSON pour enrichir le corpus avec
         # des endpoints non découverts par le crawl HTML (ex: HATEOAS links)
         for link_url in self._extract_links_from_body(obs):
@@ -89,7 +106,7 @@ class ApplicationModel:
         changed |= self._update_parameters(obs)
         changed |= self._update_data_objects(obs)
         changed |= self._update_role(obs)
-        changed |= self._update_auth_required(obs)
+        changed |= await self._update_auth_required(obs)
 
         if changed:
             self._last_updated = obs.timestamp
@@ -98,6 +115,15 @@ class ApplicationModel:
                 self.snapshot().model_dump(),
                 source="application_model",
             )
+
+        # Flow map rebuild (throttled: every 20 obs or when FSM changes)
+        _fsm_changed = self._prev_fsm_changed
+        self._prev_fsm_changed = False
+        if self._flow_builder.should_rebuild(self._obs_count, _fsm_changed):
+            flow_map = self._flow_builder.build(self.snapshot())
+            self._last_flow_map = flow_map
+            self._relations = [e.model_dump() for e in flow_map.edges]
+            await self._bus.emit(FLOW_UPDATED, flow_map.model_dump(), source="flow_map_builder")
 
     async def _on_finding_refuted(self, event: HDWPEvent) -> None:
         # Boucle d'apprentissage : une hypothèse réfutée signale que la propriété tient.
@@ -122,6 +148,7 @@ class ApplicationModel:
         ):
             self._fsm = new_fsm
             self._last_updated = new_fsm.id
+            self._prev_fsm_changed = True
             await self._bus.emit(MODEL_UPDATED, self.snapshot().model_dump(), source="application_model")
 
     # ── endpoint tracking ─────────────────────────────────
@@ -144,12 +171,29 @@ class ApplicationModel:
             ep.methods.append(method)
             changed = True
 
-        for param in self._parameters.values():
-            if param.id not in ep.parameters:
+        # Only link parameters that originate from THIS observation,
+        # not all globally accumulated parameters (prevents cross-endpoint contamination).
+        for key in self._obs_param_keys(req):
+            param = self._parameters.get(key)
+            if param and param.id not in ep.parameters:
                 ep.parameters.append(param.id)
                 changed = True
 
         return changed
+
+    def _obs_param_keys(self, req: NormalizedRequest) -> list[str]:
+        """Return the parameter store keys that come from this specific request."""
+        keys: list[str] = []
+        for name in req.query_params:
+            keys.append(f"{name}:query")
+        if isinstance(req.body, dict):
+            for name in req.body:
+                keys.append(f"{name}:body")
+        parts = self._url_parts(req.url)
+        for i, part in enumerate(parts):
+            if _NUMERIC_RE.match(part) or _UUID_RE.match(part):
+                keys.append(f"path_{i}:path")
+        return keys
 
     # ── parameter tracking ────────────────────────────────
 
@@ -214,16 +258,14 @@ class ApplicationModel:
     def _detect_affects_object(
         self, obs: RawObservation, obj: DataObjectNode
     ) -> None:
+        """Mark path parameters that are numeric/UUID as object references.
+        A numeric/UUID path segment is sufficient evidence of an object reference —
+        no need to confirm the value appears in the response body."""
         req = obs.request
-        resp = obs.response
-        assert req is not None and resp is not None
-        if not isinstance(resp.body, dict):
-            return
-
-        resp_values = {str(v) for v in resp.body.values()}
+        assert req is not None
         parts = self._url_parts(req.url)
         for i, part in enumerate(parts):
-            if _NUMERIC_RE.match(part) and part in resp_values:
+            if _NUMERIC_RE.match(part) or _UUID_RE.match(part):
                 key = f"path_{i}:path"
                 if key in self._parameters:
                     self._parameters[key].affects_object = obj.id
@@ -261,7 +303,7 @@ class ApplicationModel:
 
     # ── auth_required auto-detection ──────────────────────
 
-    def _update_auth_required(self, obs: RawObservation) -> bool:
+    async def _update_auth_required(self, obs: RawObservation) -> bool:
         """
         Auto-détecte auth_required en comparant les status codes par rôle.
 
@@ -302,6 +344,15 @@ class ApplicationModel:
                 if role not in ep.roles_observed:
                     ep.roles_observed.append(role)
                     changed = True
+        elif anon_status in (401, 403) and not ep.roles_observed:
+            # Auth requise mais aucun rôle authentifié connu : notifier l'utilisateur
+            if path_pattern not in self._auth_notified:
+                self._auth_notified.add(path_pattern)
+                await self._bus.emit(
+                    AUTH_REQUIRED,
+                    {"url": req.url, "path_pattern": path_pattern},
+                    source="application_model",
+                )
 
         return changed
 
@@ -367,12 +418,15 @@ class ApplicationModel:
 
     # ── model readiness ───────────────────────────────────
 
+    def set_confidence_weights(self, weights: dict[str, float]) -> None:
+        self._confidence_weights = weights
+
     @property
     def model_confidence(self) -> float:
         """
         Confidence score [0..1] estimating how well the model covers the application.
 
-        Three factors combined:
+        Three factors combined with KB-adapted weights:
         - endpoint_coverage : log(1+n) / log(11), saturates at 10 endpoints
         - role_coverage      : min(1.0, n_roles / 2), needs ≥2 roles
         - bola_coverage      : min(1.0, n_params_with_affects_object / 2)
@@ -385,7 +439,11 @@ class ApplicationModel:
         role_cov = min(1.0, n_roles / 2)
         bola_cov = min(1.0, n_bola / 2)
 
-        return 0.4 * ep_cov + 0.4 * role_cov + 0.2 * bola_cov
+        w = self._confidence_weights
+        total = w.get("ep", 0.4) + w.get("role", 0.4) + w.get("bola", 0.2)
+        if total == 0:
+            total = 1.0
+        return (w.get("ep", 0.4) * ep_cov + w.get("role", 0.4) * role_cov + w.get("bola", 0.2) * bola_cov) / total
 
     @property
     def is_ready(self) -> bool:

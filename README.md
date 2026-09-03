@@ -4,6 +4,15 @@
 
 A web application security testing engine that reasons by falsifying security properties, not by signatures or payloads.
 
+## Features
+
+- **Hypothesis-driven analysis** — tests security properties, not signatures
+- **Adaptive learning** — adapte les priorités, la confiance et les poids par type de cible (API, CMS, SPA, GraphQL) au fil des sessions
+- **Proxy MITM intégré** — capture des credentials HTTP/HTTPS sans dépendance externe (certificat CA auto-généré, installation automatique dans Chrome/Firefox/système)
+- **Version scanning** — détection de bibliothèques JS/CSS vulnérables (CVE via OSV.dev)
+- **Flow visualization** — graphe animé des flux de données entre endpoints
+- **Plugin system** — créez vos propres modules de détection
+
 ## Core Loop
 
 ```

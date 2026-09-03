@@ -23,6 +23,9 @@ from hdwp.core.model.schemas import (
 class IntegrityInference:
     """Inférence des propriétés d'intégrité (injection, mass assignment)."""
 
+    def provider_id(self) -> str:
+        return "builtin.integrity"
+
     def infer(self, model: ApplicationModelData) -> list[SecurityProperty]:
         properties: list[SecurityProperty] = []
         seen_statements: set[str] = set()

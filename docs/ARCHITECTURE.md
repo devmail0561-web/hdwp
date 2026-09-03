@@ -1,8 +1,8 @@
 # HDWP Engine — Document d'architecture
 
-**Version :** 0.3.1  
+**Version :** 0.4.0  
 **Auteur :** M. TENDENG  
-**Date :** 2026-09-01
+**Date :** 2026-09-03
 
 ---
 
@@ -81,6 +81,8 @@ Tous les composants communiquent exclusivement via l'Event Bus. Aucun composant 
 | `ReportEngine` | `core/report/engine.py` | Génère Markdown, JSON, HAR depuis les findings |
 | `Repository` | `store/repository.py` | Persistance async SQLite de toutes les entités |
 | `TokenBucket` | `core/experiment/rate_limiter.py` | Contrôle du débit des requêtes actives |
+| `KnowledgeBase` | `core/knowledge/base.py` | Base de connaissances persistante inter-sessions : poids adaptatifs, classification de cible |
+| `InferenceRegistry` | `core/property_engine/inference_registry.py` | Registre des modules d'inférence built-in + tiers (entry_points) |
 | `PluginRegistry` | `plugins/registry.py` | Découverte des plugins via `importlib.metadata.entry_points` |
 
 ---
@@ -278,7 +280,7 @@ overall = 0.25 × oracle_strength
 ### 7.2 Règles d'inférence implémentées
 
 **AUTHORIZATION (3 règles)** — `core/property_engine/inference/authorization.py`
-1. **BOLA** : tout `ParameterNode` avec `affects_object` et `type_inferred in ("integer", "uuid")` → propriété d'autorisation sur l'ownership
+1. **BOLA** : tout `ParameterNode` avec `affects_object` et `type_inferred in ("integer", "uuid")` → propriété d'autorisation sur l'ownership. La confiance est **adaptative** : si la KB contient ≥ 3 findings BOLA, la confiance est calculée comme `0.3 × base + 0.7 × taux_historique` (clampé [0.3, 0.95]) via les `kb_stats` injectés par `InferenceRegistry.default_with_kb_stats()`.
 2. **Endpoint auth** : tout endpoint avec `auth_required=True` et `roles_observed` non vide → propriété de contrôle d'accès
 3. **Séparation de rôles** : si ≥ 2 rôles avec des permissions exclusives → propriété d'isolation de rôles
 
@@ -312,12 +314,14 @@ model.model_confidence  # float 0.0–1.0
 model.is_ready          # True si model_confidence >= 0.3
 ```
 
-Formule :
+Formule (poids adaptatifs depuis la KnowledgeBase) :
 ```
-confidence = 0.4 × log(1 + n_endpoints) / log(11)
-           + 0.4 × min(1.0, n_roles / 2)
-           + 0.2 × min(1.0, n_bola_params / 2)
+confidence = (w_ep × log(1 + n_endpoints) / log(11)
+            + w_role × min(1.0, n_roles / 2)
+            + w_bola × min(1.0, n_bola_params / 2)) / (w_ep + w_role + w_bola)
 ```
+
+Par défaut `w_ep=0.4, w_role=0.4, w_bola=0.2`. Après ≥ 5 sessions avec `model_snapshot`, les poids sont calculés par `KnowledgeBase.get_confidence_weights()` en fonction des corrélations historiques entre endpoints/rôles/BOLA et les findings détectés. Les poids sont clampés dans `[0.1, 0.7]` pour éviter qu'un facteur monopolise le score.
 
 ---
 
@@ -399,7 +403,21 @@ finding.refuted
                         └─► nouvelles hypothèses générées
 ```
 
-### 10.3 Mode passif (Phase 6)
+### 10.3 Apprentissage adaptatif inter-sessions
+
+La `KnowledgeBase` (`core/knowledge/base.py`) persiste les résultats entre sessions dans `~/.hdwp/knowledge.db` et adapte le comportement du moteur :
+
+| Mécanisme | Source | Consommateur | Effet |
+|---|---|---|---|
+| Poids de priorité par type de cible | `get_adapted_weights(target_type=)` | `HypothesisPrioritizer` | Les types de vulnérabilités fréquemment confirmés pour un type de cible donné (API, CMS, SPA, GraphQL) sont priorisés |
+| Poids de confiance modèle | `get_confidence_weights()` | `ApplicationModel.model_confidence` | L'importance relative endpoints/rôles/BOLA dans le score de maturité s'ajuste selon les corrélations historiques |
+| Confiance BOLA adaptative | `kb_stats` via `InferenceRegistry` | `AuthorizationInference._infer_bola` | La confiance des propriétés BOLA inférées reflète le taux de confirmation historique |
+
+**Classification de cible** (`classify_target()`) : deux phases — au démarrage par URL seule (rapide, disponible pour `get_adapted_weights`), en fin de scan par URL + modèle (plus fiable, stocké en DB).
+
+**Migration backward-compatible** : `_migrate_schema()` ajoute les colonnes manquantes à `session_meta` et migre la PK de `pattern_stats` de 2 à 3 colonnes (`target_type`). Idempotent et safe sur DB neuve ou existante.
+
+### 10.4 Mode passif (Phase 6)
 
 Le mode passif utilise `mitmproxy` comme proxy MITM. Le testeur navigue manuellement ; chaque requête capturée est normalisée et émise sur `observation.raw`. Le reste de la pipeline est identique.
 
@@ -435,6 +453,9 @@ src/hdwp/
 │   │   ├── rate_limiter.py              # TokenBucket
 │   │   ├── request_selector.py          # RequestSelector + ConcreteExperimentPlan
 │   │   └── session_manager.py           # SessionManager + TokenExpiredError
+│   ├── knowledge/
+│   │   ├── base.py                      # KnowledgeBase, classify_target()
+│   │   └── models.py                    # PatternStatsRecord, SessionMetaRecord
 │   ├── hypothesis/
 │   │   ├── engine.py                    # HypothesisEngine
 │   │   └── prioritizer.py              # HypothesisPrioritizer
@@ -452,6 +473,7 @@ src/hdwp/
 │   │   └── violation_oracle.py          # assess_violation (mutation-aware)
 │   └── property_engine/
 │       ├── engine.py                    # SecurityPropertyEngine
+│       ├── inference_registry.py        # InferenceRegistry (built-in + entry_points)
 │       ├── property_types.py            # InferenceModule protocol
 │       └── inference/
 │           ├── authorization.py         # 3 règles BOLA/AuthZ/séparation

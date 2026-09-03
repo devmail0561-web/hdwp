@@ -19,14 +19,43 @@ console = Console()
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    target: Annotated[
+        str | None,
+        typer.Option(
+            "--target",
+            "-t",
+            help="URL cible directe (cree un contexte minimal automatiquement)",
+        ),
+    ] = None,
+    context: Annotated[
+        Path | None,
+        typer.Option(
+            "--context",
+            "-c",
+            help="Fichier hdwp-context.yaml",
+        ),
+    ] = None,
+    db_url: Annotated[
+        str | None,
+        typer.Option("--db", help="Evidence store URL"),
+    ] = None,
+) -> None:
     if ctx.invoked_subcommand is None:
-        from hdwp.tui.app import HDWPApp
+        if target and not context:
+            context = _create_minimal_context(target)
 
-        HDWPApp().run()
+        from hdwp.server.launcher import start_native_app
+
+        start_native_app(
+            context_path=context,
+            db_url=db_url,
+            auto_start_url=target,
+        )
 
 
-@app.command()
+@app.command(hidden=True)
 def run(
     context: Annotated[
         Path | None,
@@ -57,8 +86,8 @@ def run(
 
     Usages :
 
-      hdwp run --target https://example.com        (zero config)
-      hdwp run --context mon-pentest.yaml           (config complete)
+      hdwp --target https://example.com           (zero config)
+      hdwp --context mon-pentest.yaml             (config complete)
     """
     if target and not context:
         context = _create_minimal_context(target)
@@ -94,14 +123,14 @@ def run(
         asyncio.run(_run_headless())
         return
 
-    # Default: TUI interactif avec auto_start si --target
-    from hdwp.tui.app import HDWPApp
+    # Default: app native avec auto_start si --target
+    from hdwp.server.launcher import start_native_app
 
-    HDWPApp(
+    start_native_app(
         context_path=context,
         db_url=db_url,
         auto_start_url=target,
-    ).run()
+    )
 
 
 def _create_minimal_context(target_url: str) -> Path:
@@ -358,3 +387,57 @@ def knowledge(
         await kb.close()
 
     asyncio.run(_run())
+
+
+@app.command("install-ca")
+def install_ca(  # noqa: D103
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Afficher les détails"),
+) -> None:
+    """Installe le certificat CA HDWP dans tous les navigateurs détectés (Chrome, Firefox, système)."""
+    import rich
+    from rich.table import Table
+
+    from hdwp.core.observation.ca_installer import install_ca_everywhere
+    from hdwp.core.observation.hdwp_proxy import CA_CERT_PATH, _load_or_create_ca
+
+    # Générer le CA si nécessaire
+    if not CA_CERT_PATH.exists():
+        rich.print("[yellow]Génération du certificat CA...[/yellow]")
+        try:
+            _load_or_create_ca()
+            rich.print(f"[green]CA créé : {CA_CERT_PATH}[/green]")
+        except Exception as exc:
+            rich.print(f"[red]Erreur lors de la création du CA : {exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    rich.print(f"[dim]Certificat CA : {CA_CERT_PATH}[/dim]")
+    rich.print("[yellow]Installation en cours...[/yellow]")
+
+    results = install_ca_everywhere(CA_CERT_PATH)
+
+    table = Table(title="Installation du certificat CA HDWP")
+    table.add_column("Cible", style="cyan")
+    table.add_column("Statut", justify="center")
+    table.add_column("Message")
+
+    success = 0
+    for target, info in results.items():
+        ok = info.get("ok", False)
+        if ok:
+            success += 1
+        table.add_row(
+            target,
+            "[green]✓[/green]" if ok else "[red]✗[/red]",
+            info.get("message", ""),
+        )
+
+    console = rich.console.Console()
+    console.print(table)
+    console.print(f"\n[bold]{success}/{len(results)}[/bold] cibles configurées.")
+
+    if success < len(results):
+        console.print(
+            "\n[yellow]Pour les navigateurs NSS (Chrome/Firefox), "
+            "installez libnss3-tools :[/yellow]"
+        )
+        console.print("  [dim]sudo apt install libnss3-tools[/dim]")
