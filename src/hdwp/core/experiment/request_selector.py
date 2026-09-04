@@ -421,6 +421,71 @@ def plan_origin_test(
     return []
 
 
+def plan_race_condition(
+    hyp: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """Race condition test: select write endpoint matching race keywords."""
+    endpoint_path = spec.mutation_params.get("endpoint_path", "")
+    concurrency = spec.mutation_params.get("concurrency", 10)
+
+    for path, requests in corpus.items():
+        if not requests:
+            continue
+        if endpoint_path and (path == endpoint_path or path.startswith(endpoint_path.split("{")[0])):
+            role_name, req = requests[0]
+            # Only write operations
+            if req.method in ("POST", "PUT", "PATCH"):
+                return [ConcreteExperimentPlan(
+                    hypothesis_id=hyp.id,
+                    mutation_type="race_condition",
+                    baseline_request=req,
+                    baseline_role=role_name,
+                    target_role=None,
+                    mutated_value=str(concurrency),
+                    mutated_param_name=None,
+                    mutated_param_location=None,
+                    description=f"Race condition: {concurrency} concurrent requests on {path}",
+                    experiment_spec=spec,
+                )]
+    return []
+
+
+def plan_token_reuse(
+    hyp: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """Token reuse test: find authenticated endpoint + logout endpoint."""
+    auth_endpoint = spec.mutation_params.get("authenticated_endpoint", "")
+    logout_endpoint = spec.mutation_params.get("logout_endpoint", "")
+
+    # Find authenticated request
+    for path, requests in corpus.items():
+        if not requests:
+            continue
+        if auth_endpoint and (path == auth_endpoint or path.startswith(auth_endpoint.split("{")[0])):
+            for role_name, req in requests:
+                # Must have auth header
+                if "authorization" in {k.lower() for k in req.headers.keys()}:
+                    return [ConcreteExperimentPlan(
+                        hypothesis_id=hyp.id,
+                        mutation_type="token_reuse",
+                        baseline_request=req,
+                        baseline_role=role_name,
+                        target_role=None,
+                        mutated_value=logout_endpoint,
+                        mutated_param_name=None,
+                        mutated_param_location=None,
+                        description=f"Token reuse: replay after logout on {path}",
+                        experiment_spec=spec,
+                    )]
+    return []
+
+
 class RequestSelector:
     """
     Resolves abstract ExperimentSpec objects into ConcreteExperimentPlan objects

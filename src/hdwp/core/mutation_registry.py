@@ -279,6 +279,18 @@ def _register_builtins() -> None:
             "cwe_id": "CWE-942",
             "remediation": "Restreindre Access-Control-Allow-Origin aux domaines de confiance.",
         },
+        {
+            "name": "race_condition",
+            "owasp_category": "A04:2021",
+            "cwe_id": "CWE-362",
+            "remediation": "Implementer des operations atomiques avec verrous ou transactions.",
+        },
+        {
+            "name": "token_reuse",
+            "owasp_category": "A07:2021",
+            "cwe_id": "CWE-613",
+            "remediation": "Invalider les tokens cote serveur au logout.",
+        },
     ]
     for meta in _metadata:
         try:
@@ -295,6 +307,8 @@ def _register_builtins() -> None:
             apply_object_ref_change,
             apply_origin_test,
             apply_privilege_escalation,
+            apply_race_condition,
+            apply_token_reuse,
         )
         from hdwp.core.experiment.request_selector import (
             plan_field_injection,
@@ -303,6 +317,8 @@ def _register_builtins() -> None:
             plan_object_ref_change,
             plan_origin_test,
             plan_privilege_escalation,
+            plan_race_condition,
+            plan_token_reuse,
         )
 
         _plan_apply: list[tuple[str, object, object]] = [
@@ -312,6 +328,8 @@ def _register_builtins() -> None:
             ("field_injection",      plan_field_injection,      apply_field_injection),
             ("jwt_manipulation",     plan_jwt_manipulation,     apply_jwt_manipulation),
             ("origin_test",          plan_origin_test,          apply_origin_test),
+            ("race_condition",       plan_race_condition,       apply_race_condition),
+            ("token_reuse",          plan_token_reuse,          apply_token_reuse),
         ]
         for mut_name, plan_fn, apply_fn in _plan_apply:
             entry = _MUTATIONS.get(mut_name)

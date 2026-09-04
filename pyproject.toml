@@ -52,6 +52,10 @@ hdwp = "hdwp.cli.main:app"
 "core.information_flow.info_disclosure" = "hdwp.plugins.core.information_flow.info_disclosure:InfoDisclosurePlugin"
 "core.information_flow.ssrf" = "hdwp.plugins.core.information_flow.ssrf:SSRFPlugin"
 "core.business_invariant.race_condition" = "hdwp.plugins.core.business_invariant.race_condition:RaceConditionPlugin"
+"core.injection.sqli" = "hdwp.plugins.core.injection.sqli:SQLiPlugin"
+"core.injection.xss" = "hdwp.plugins.core.injection.xss:XSSPlugin"
+"core.injection.ssti" = "hdwp.plugins.core.injection.ssti:SSTIPlugin"
+"core.temporal.session_replay" = "hdwp.plugins.core.temporal.session_replay:SessionReplayPlugin"
 
 [project.entry-points."hdwp.inference"]
 authorization   = "hdwp.core.property_engine.inference.authorization:AuthorizationInference"
@@ -69,6 +73,8 @@ privilege_escalation = "hdwp.core.experiment.request_selector:plan_privilege_esc
 field_injection      = "hdwp.core.experiment.request_selector:plan_field_injection"
 jwt_manipulation     = "hdwp.core.experiment.request_selector:plan_jwt_manipulation"
 origin_test          = "hdwp.core.experiment.request_selector:plan_origin_test"
+race_condition       = "hdwp.core.experiment.request_selector:plan_race_condition"
+token_reuse          = "hdwp.core.experiment.request_selector:plan_token_reuse"
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"

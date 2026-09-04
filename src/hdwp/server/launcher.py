@@ -4,6 +4,7 @@
 """Lance le serveur FastAPI et ouvre la fenêtre pywebview (ou le navigateur)."""
 from __future__ import annotations
 
+import socket
 import threading
 import time
 import urllib.parse
@@ -18,8 +19,21 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-_PORT = 7860
+_DEFAULT_PORT = 7860
 _HOST = "127.0.0.1"
+
+
+def _find_free_port(host: str, start: int, max_attempts: int = 20) -> int:
+    """Return *start* if available, otherwise probe upward until a free port is found."""
+    for offset in range(max_attempts):
+        port = start + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(f"No free port found in range {start}–{start + max_attempts - 1}")
 
 
 def _load_env_file() -> None:
@@ -77,17 +91,22 @@ def start_native_app(
     """Lance le serveur FastAPI + ouvre la fenêtre native (pywebview ou navigateur)."""
     _load_env_file()
     _setup_proxy()   # tout-en-un : certutil + CA + install navigateurs
-    server_thread = threading.Thread(target=_run_uvicorn, daemon=True)
+
+    port = _find_free_port(_HOST, _DEFAULT_PORT)
+    if port != _DEFAULT_PORT:
+        log.info("launcher.port_busy", default=_DEFAULT_PORT, using=port)
+
+    server_thread = threading.Thread(target=_run_uvicorn, args=(port,), daemon=True)
     server_thread.start()
 
-    health_url = f"http://{_HOST}:{_PORT}/api/health"
+    health_url = f"http://{_HOST}:{port}/api/health"
     if not _wait_for_health(health_url, timeout=10.0):
         raise RuntimeError(
-            f"Le serveur HDWP n'a pas démarré en 10s sur {_HOST}:{_PORT}. "
-            "Vérifiez que le port n'est pas occupé."
+            f"Le serveur HDWP n'a pas démarré en 10s sur {_HOST}:{port}. "
+            "Vérifiez les logs."
         )
 
-    startup_url = f"http://{_HOST}:{_PORT}"
+    startup_url = f"http://{_HOST}:{port}"
     if auto_start_url:
         startup_url += f"?target={urllib.parse.quote(auto_start_url, safe='')}"
 
@@ -95,13 +114,13 @@ def start_native_app(
     _open_window(startup_url)
 
 
-def _run_uvicorn() -> None:
+def _run_uvicorn(port: int) -> None:
     import uvicorn
     uvicorn.run(
         "hdwp.server.app:create_app",
         factory=True,
         host=_HOST,
-        port=_PORT,
+        port=port,
         log_level="warning",
         access_log=False,
     )

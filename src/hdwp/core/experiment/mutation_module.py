@@ -141,6 +141,16 @@ def apply_origin_test(plan: ConcreteExperimentPlan, sm: SessionManager) -> Norma
     return plan.baseline_request.model_copy(update={"headers": new_headers})
 
 
+def apply_race_condition(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
+    """Return baseline request unmodified — concurrency handled by TemporalModule."""
+    return plan.baseline_request
+
+
+def apply_token_reuse(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
+    """Return baseline request unmodified — replay logic handled by TemporalModule."""
+    return plan.baseline_request
+
+
 class MutationModule:
     """
     Applies a mutation to a reference request according to the provided plan.
