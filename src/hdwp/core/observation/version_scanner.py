@@ -86,7 +86,8 @@ async def _check_osv_batch(libs: list[tuple[str, str]]) -> dict[tuple[str, str],
         for lib, ver in uncached
     ]
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        from hdwp.core.http_client import build_client
+        async with build_client(timeout=10.0) as client:
             resp = await client.post(
                 "https://api.osv.dev/v1/querybatch",
                 json={"queries": queries},
@@ -99,8 +100,8 @@ async def _check_osv_batch(libs: list[tuple[str, str]]) -> dict[tuple[str, str],
                 _osv_cache[(lib, ver)] = vulns
     except Exception as exc:
         log.warning("version_scanner.osv_failed", error=str(exc))
-        for lv in uncached:
-            _osv_cache[lv] = []
+        # Ne PAS mettre en cache les erreurs réseau — une liste vide permanente
+        # ferait croire que les bibliothèques sont saines sur les rescans suivants.
 
     return {lv: _osv_cache.get(lv, []) for lv in libs}
 
@@ -146,10 +147,46 @@ async def scan_and_emit(
 
         max_cvss = 5.0
         for v in vulns:
+            # OSV v1 API returns severity in a top-level "severity" array:
+            # [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/.../AH"}]
+            # The numeric base score must be parsed from the vector string.
+            for sev in v.get("severity", []):
+                sev_type = sev.get("type", "")
+                # OSV retourne le score soit comme nombre, soit comme vecteur CVSS v3
+                raw_score = sev.get("score", "")
+                if isinstance(raw_score, (int, float)):
+                    max_cvss = max(max_cvss, float(raw_score))
+                    continue
+                if not isinstance(raw_score, str):
+                    continue
+                # Score numérique direct (ex: "9.8")
+                try:
+                    max_cvss = max(max_cvss, float(raw_score))
+                    continue
+                except ValueError:
+                    pass
+                # Vecteur CVSS v3 : "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+                # Le score numérique n'est PAS dans le vecteur lui-même — il faut
+                # l'extraire depuis le champ "baseScore" dans database_specific,
+                # ou depuis l'alias "base_score" retourné par certains fournisseurs.
+                # Pour les vecteurs purs sans score adjacent, dériver depuis les
+                # composantes Impact (C/I/A) : H→9.8, L→4.0, N→0.0 (approximation).
+                if sev_type.upper() in ("CVSS_V3", "CVSS_V2") and raw_score.startswith("CVSS:"):
+                    cia = re.findall(r':([HLN])', raw_score[-9:])
+                    if cia:
+                        weights = {"H": 3, "L": 1, "N": 0}
+                        impact = sum(weights.get(c, 0) for c in cia[-3:])
+                        # H/H/H (9) → ~9.8 ; L/L/L (3) → ~4.0 ; N/N/N (0) → 0.0
+                        approx = round(impact * 9.8 / 9, 1)
+                        max_cvss = max(max_cvss, approx)
+            # Also honour database_specific fields that some ecosystems populate
             db = v.get("database_specific", {})
-            score = db.get("cvss_v3", {}).get("base_score") or db.get("severity_score")
-            if score and isinstance(score, (int, float)):
-                max_cvss = max(max_cvss, float(score))
+            for _key in ("cvss_v3", "cvss"):
+                _nested = db.get(_key, {})
+                if isinstance(_nested, dict):
+                    _score = _nested.get("base_score") or _nested.get("score")
+                    if isinstance(_score, (int, float)):
+                        max_cvss = max(max_cvss, float(_score))
 
         cve_ids = [v["id"] for v in vulns[:5]]
         finding = Finding(

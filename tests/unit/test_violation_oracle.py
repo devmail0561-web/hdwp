@@ -54,9 +54,22 @@ def _make_diff(
 # ── identity_swap ──────────────────────────────────────────────────────────
 
 def test_identity_swap_both_200_high_similarity_confirmed() -> None:
+    # Même données, pas de diff comportemental, score d'identité None
+    # → AMBIGUOUS : impossible de prouver l'accès croisé sans champs d'identité comparables
     baseline = _make_result(200, {"id": 1, "name": "alice"})
     experiment = _make_result(200, {"id": 1, "name": "alice"})
     diff = _make_diff(body_similarity=1.0)
+    assessment = assess_violation("identity_swap", baseline, experiment, diff)
+    assert assessment.verdict == ViolationVerdict.AMBIGUOUS
+
+
+def test_identity_swap_both_200_different_identity_confirmed() -> None:
+    # Données différentes (score bas) → CONFIRMED (attaquant a obtenu des données d'autrui)
+    from hdwp.core.model.schemas import SemanticDiff, DiffVerdict, generate_id
+    baseline = _make_result(200, {"id": 1, "name": "alice"})
+    experiment = _make_result(200, {"id": 2, "name": "bob"})
+    diff = _make_diff(body_similarity=0.9)
+    diff = diff.model_copy(update={"data_identity_score": 0.0})  # données complètement différentes
     assessment = assess_violation("identity_swap", baseline, experiment, diff)
     assert assessment.verdict == ViolationVerdict.CONFIRMED
     assert assessment.confidence_hint >= 0.7
@@ -116,12 +129,31 @@ def test_object_ref_change_404_refuted() -> None:
 # ── privilege_escalation ───────────────────────────────────────────────────
 
 def test_privilege_escalation_200_confirmed() -> None:
+    # Rôle non-autorisé obtient 200 → escalade confirmée, quelle que soit la similarité de contenu
     baseline = _make_result(200, {"users": []})
     experiment = _make_result(200, {"users": []})
     diff = _make_diff()
     assessment = assess_violation("privilege_escalation", baseline, experiment, diff)
     assert assessment.verdict == ViolationVerdict.CONFIRMED
-    assert assessment.confidence_hint >= 0.9
+
+
+def test_privilege_escalation_200_different_content_higher_confidence() -> None:
+    # Contenu différent → confiance plus haute
+    baseline = _make_result(403)
+    experiment = _make_result(200, {"users": [{"id": 1}]})
+    diff = _make_diff(status_diff=True, verdict=DiffVerdict.SIGNIFICANT)
+    assessment = assess_violation("privilege_escalation", baseline, experiment, diff)
+    assert assessment.verdict == ViolationVerdict.CONFIRMED
+    assert assessment.confidence_hint >= 0.85
+
+
+def test_privilege_escalation_200_different_content_confirmed() -> None:
+    # Baseline interdit (403) mais role non-autorisé obtient 200 avec données → CONFIRMED
+    baseline = _make_result(403)
+    experiment = _make_result(200, {"users": [{"id": 1}, {"id": 2}]})
+    diff = _make_diff(status_diff=True, verdict=DiffVerdict.SIGNIFICANT)
+    assessment = assess_violation("privilege_escalation", baseline, experiment, diff)
+    assert assessment.verdict == ViolationVerdict.CONFIRMED
 
 
 def test_privilege_escalation_403_refuted() -> None:

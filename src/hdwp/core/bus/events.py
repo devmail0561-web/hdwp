@@ -33,6 +33,9 @@ FLOW_UPDATED = "flow.updated"
 # Emis par ApplicationModel quand un endpoint nécessite une authentification non configurée.
 # Payload : {"url": str, "path_pattern": str}
 AUTH_REQUIRED = "auth.required"
+SCAN_COMPLETED = "scan.completed"
+SCAN_ERROR = "scan.error"
+FINDINGS_CORRELATED = "findings.correlated"
 
 ALL_EVENT_TYPES = [
     OBSERVATION_RAW,
@@ -51,6 +54,9 @@ ALL_EVENT_TYPES = [
     FLOW_UPDATED,
     AUTH_REQUIRED,
     CREDENTIALS_CAPTURED,
+    SCAN_COMPLETED,
+    SCAN_ERROR,
+    FINDINGS_CORRELATED,
 ]
 
 

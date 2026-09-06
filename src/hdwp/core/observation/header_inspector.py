@@ -14,6 +14,10 @@ SECURITY_HEADERS: dict[str, str] = {
     "x-content-type-options": "XCTO",
     "x-xss-protection": "XXP",
     "referrer-policy": "RP",
+    "permissions-policy": "PERMISSIONS_POLICY",
+    "cross-origin-opener-policy": "COOP",
+    "cross-origin-embedder-policy": "COEP",
+    "cross-origin-resource-policy": "CORP",
 }
 
 SERVER_HEADERS = frozenset({"server", "x-powered-by"})
@@ -49,9 +53,15 @@ class HeaderInspector:
             cookies = _COOKIE_SPLIT.split(set_cookie)
             missing_flags: set[str] = set()
             for cookie in cookies:
-                cookie_lower = cookie.lower()
+                # Split cookie string into directive tokens (name=value or bare flag).
+                # Using token names prevents substring false-positives such as
+                # "secure" matching inside a value like "my_secure_password".
+                directives = {
+                    part.strip().split("=")[0].strip().lower()
+                    for part in cookie.split(";")
+                }
                 for flag in COOKIE_FLAGS:
-                    if flag not in cookie_lower:
+                    if flag not in directives:
                         missing_flags.add(flag)
             for flag in sorted(missing_flags):
                 tags.append(f"cookie:missing-{flag}")

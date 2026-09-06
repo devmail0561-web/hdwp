@@ -5,6 +5,7 @@ const TABS: Tab[] = [
   { id: 'findings', label: '⬡ FINDINGS' },
   { id: 'flow', label: '⬡ FLOW', variant: 'warn' },
   { id: 'report', label: '⬡ REPORT', variant: 'warn' },
+  { id: 'payload', label: '⬡ PAYLOAD', variant: 'warn' },
   { id: 'exploit', label: '⬡ EXPLOIT', variant: 'alert' },
   { id: 'plugins', label: '⬡ PLUGINS' },
   { id: 'settings', label: '⬡ SETTINGS' },

@@ -239,8 +239,19 @@ class KnowledgeBase:
                     )
                 )
                 records = result.all()
-                total_count = sum(r.total_count for r in records)
-                if total_count < MIN_SESSIONS_FOR_TARGET_WEIGHTS:
+                # Count distinct sessions for this target_type so that the
+                # threshold is compared against session count, not experiment
+                # count.  Using total_count (experiments) incorrectly activates
+                # target-specific weights after a single session with >= 3 runs.
+                from sqlalchemy import func
+                from sqlalchemy import select as sql_select
+                stmt = sql_select(func.count()).select_from(SessionMetaRecord).where(
+                    SessionMetaRecord.target_type == target_type
+                )
+                # Use raw session.execute for aggregate scalar queries.
+                count_result = await session.execute(stmt)
+                session_count_for_type = int(count_result.scalar() or 0)
+                if session_count_for_type < MIN_SESSIONS_FOR_TARGET_WEIGHTS:
                     result = await session.exec(select(PatternStatsRecord))
                     records = result.all()
             else:

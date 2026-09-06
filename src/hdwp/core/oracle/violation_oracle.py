@@ -63,12 +63,34 @@ def _assess_identity_swap(
         )
 
     if base_status < 300 and exp_status < 300:
-        if diff.body_similarity >= 0.7 or not diff.structural_difference:
+        same_structure = diff.body_similarity >= 0.7 or not diff.structural_difference
+        if same_structure:
+            # score >= 0.85 → attaquant reçoit ses propres données → faux positif → REFUTED
+            if diff.data_identity_score is not None and diff.data_identity_score >= 0.85:
+                return ViolationAssessment(
+                    verdict=ViolationVerdict.REFUTED,
+                    rationale=(
+                        f"Identity swap: server returned attacker's own data "
+                        f"(identity_score={diff.data_identity_score:.2f}) — access correctly scoped"
+                    ),
+                    confidence_hint=0.7,
+                )
+            # score is None + pas de diff comportemental → réponse identique sans champs d'identité
+            # → probablement des données publiques ou la même réponse pour tout le monde → AMBIGUOUS
+            if diff.data_identity_score is None and not diff.behavioral_difference:
+                return ViolationAssessment(
+                    verdict=ViolationVerdict.AMBIGUOUS,
+                    rationale=(
+                        "Identity swap: même réponse structurelle sans champs d'identité comparables "
+                        "— impossible de déterminer si les données appartiennent à un autre utilisateur"
+                    ),
+                    confidence_hint=0.4,
+                )
             return ViolationAssessment(
                 verdict=ViolationVerdict.CONFIRMED,
                 rationale=(
-                    f"Identity swap succeeded: attacker receives same data as owner "
-                    f"(similarity={diff.body_similarity:.2f}, status={exp_status})"
+                    f"Identity swap succeeded: attacker receives different data "
+                    f"(similarity={diff.body_similarity:.2f}, identity_score={diff.data_identity_score}, status={exp_status})"
                 ),
                 confidence_hint=0.9 if diff.body_similarity >= 0.9 else 0.7,
             )
@@ -102,13 +124,23 @@ def _assess_object_ref_change(
     if exp_status < 300:
         exp_body = experiment.response_received.body
         has_data = isinstance(exp_body, dict) and len(exp_body) > 0
+        if not has_data:
+            return ViolationAssessment(
+                verdict=ViolationVerdict.AMBIGUOUS,
+                rationale=f"Foreign object returned {exp_status} but body empty",
+                confidence_hint=0.3,
+            )
+        # If identity fields match baseline exactly, attacker got their own object back
+        if diff.data_identity_score is not None and diff.data_identity_score >= 0.95:
+            return ViolationAssessment(
+                verdict=ViolationVerdict.REFUTED,
+                rationale=f"Object ref change: response identical to requester's own object (identity_score={diff.data_identity_score:.2f})",
+                confidence_hint=0.3,
+            )
         return ViolationAssessment(
             verdict=ViolationVerdict.CONFIRMED,
-            rationale=(
-                f"Foreign object accessible: returned {exp_status} with "
-                f"{'data' if has_data else 'empty body'}"
-            ),
-            confidence_hint=0.9 if has_data else 0.6,
+            rationale=f"Foreign object accessible: returned {exp_status} with data (identity_score={diff.data_identity_score})",
+            confidence_hint=0.9,
         )
 
     return ViolationAssessment(
@@ -133,10 +165,12 @@ def _assess_privilege_escalation(
         )
 
     if exp_status < 300:
+        # Accès 2xx pour un rôle non-autorisé = escalade confirmée.
+        # Note: la confiance est modulée selon le niveau de preuve dans le diff.
         return ViolationAssessment(
             verdict=ViolationVerdict.CONFIRMED,
-            rationale=f"Privilege escalation succeeded: endpoint returned {exp_status}",
-            confidence_hint=0.95,
+            rationale=f"Privilege escalation succeeded: endpoint returned {exp_status} for unauthorized role",
+            confidence_hint=0.9 if (diff.structural_difference or diff.behavioral_difference or diff.status_difference) else 0.7,
         )
 
     if 300 <= exp_status < 400:

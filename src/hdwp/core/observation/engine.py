@@ -49,7 +49,7 @@ class ObservationEngine:
         # 1. Tenter la découverte automatique de spec OpenAPI AVANT le crawl HTML.
         #    (sauf si déjà seedée via seed_from_spec() avant start())
         from hdwp.core.observation.openapi_seeder import auto_discover_spec, seed_from_openapi_spec
-        discovery_delay = max(0.0, 60.0 / rate_limiter.max_rate - 1.0) if rate_limiter.max_rate > 0 else 1.0
+        discovery_delay = min(1.0, max(0.0, 60.0 / rate_limiter.max_rate - 1.0)) if rate_limiter.max_rate > 0 else 1.0
         spec = await auto_discover_spec(self._context.base_url, delay_between_requests=discovery_delay)
         if spec:
             seeded = await seed_from_openapi_spec(self._bus, self._context, spec)
@@ -67,6 +67,23 @@ class ObservationEngine:
             emit_observations=(self._proxy_url is None),
         )
         await self._crawler.crawl(self._context.base_url)
+
+        # SPA crawl via Playwright — only when proxy is active (port known)
+        # Routes browser traffic through the HDWP MITM proxy automatically
+        if self._proxy_url:
+            try:
+                from urllib.parse import urlparse as _urlparse
+                from hdwp.core.observation.spa_crawler import SPACrawler
+                port = _urlparse(self._proxy_url).port or 8080
+                spa = SPACrawler(
+                    proxy_port=port,
+                    bus=self._bus,
+                    session_id=self._context.session_id,
+                )
+                await spa.crawl(self._context.base_url)
+            except Exception as exc:
+                log.debug("spa_crawler.skipped", reason=str(exc))
+
         self._running = False
         log.info("observation_engine.done")
 

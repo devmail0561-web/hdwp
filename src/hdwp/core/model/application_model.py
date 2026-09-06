@@ -39,6 +39,21 @@ _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
 
+_PII_FIELD_NAMES = frozenset({
+    "email", "password", "passwd", "ssn", "phone", "address", "credit_card",
+    "creditcard", "national_id", "dob", "date_of_birth", "passport", "tax_id",
+    "private_key", "secret", "api_key", "apikey", "auth_token", "refresh_token",
+    "access_token", "billing", "salary", "income",
+})
+
+
+def _infer_sensitivity(schema_def: dict) -> str:
+    """Elevate DataObjectNode sensitivity to 'sensitive' if schema contains PII field names."""
+    keys_lower = {k.lower() for k in schema_def} if isinstance(schema_def, dict) else set()
+    if keys_lower & _PII_FIELD_NAMES:
+        return "sensitive"
+    return "public"
+
 
 class ApplicationModel:
     """Subscribes to observation.raw events and incrementally builds the
@@ -58,6 +73,9 @@ class ApplicationModel:
         self._status_by_role: dict[str, dict[str, int]] = {}
         # FSM apprise par StateMachineLearner
         self._fsm: ApplicationFSM | None = None
+        # Tech stack et content types agrégés
+        self._tech_stack: set[str] = set()
+        self._detected_content_types: set[str] = set()
 
         # Flow map builder
         from hdwp.core.model.flow_map_builder import FlowMapBuilder
@@ -100,6 +118,40 @@ class ApplicationModel:
                 # Ajouter l'URL au corpus sans émettre d'observation complète
                 # (sera crawlé lors de la prochaine session si dans le scope)
                 self._store_in_corpus_by_url(link_url, obs)
+
+        # Agréger tech_stack depuis les tags d'observation (header_inspector)
+        for tag in obs.tags:
+            if tag.startswith(("server:", "framework:", "db:", "cms:")):
+                self._tech_stack.add(tag)
+
+        # Agréger content-type depuis la réponse
+        if obs.response and obs.response.content_type:
+            ct = obs.response.content_type.split(";")[0].strip().lower()
+            if ct:
+                self._detected_content_types.add(ct)
+            # Propager vers l'endpoint
+            path_pattern = self._normalize_path(obs.request.url)
+            if path_pattern in self._endpoints:
+                ep = self._endpoints[path_pattern]
+                if not ep.response_content_type:
+                    ep.response_content_type = ct
+                if "xml" in ct:
+                    ep.accepts_xml = True
+
+        # Extraire les méthodes depuis le header Allow: des réponses OPTIONS
+        # C'est le seul endroit où le serveur déclare explicitement les méthodes acceptées.
+        if obs.request.method.upper() == "OPTIONS" and obs.response:
+            allow_hdr = (obs.response.headers or {}).get("allow", "")
+            if allow_hdr:
+                path_pattern = self._normalize_path(obs.request.url)
+                ep = self._endpoints.get(path_pattern)
+                if ep is None:
+                    ep = EndpointNode(path=path_pattern, methods=[])
+                    self._endpoints[path_pattern] = ep
+                for m in allow_hdr.replace(",", " ").split():
+                    m = m.strip().upper()
+                    if m and m not in ep.methods and m not in ("OPTIONS", "HEAD"):
+                        ep.methods.append(m)
 
         changed = False
         changed |= self._update_endpoint(obs)
@@ -159,9 +211,11 @@ class ApplicationModel:
         path_pattern = self._normalize_path(req.url)
         method = req.method.upper()
 
+        is_graphql = "graphql" in path_pattern.lower()
+
         if path_pattern not in self._endpoints:
             self._endpoints[path_pattern] = EndpointNode(
-                path=path_pattern, methods=[method]
+                path=path_pattern, methods=[method], is_graphql=is_graphql,
             )
             return True
 
@@ -169,6 +223,9 @@ class ApplicationModel:
         changed = False
         if method not in ep.methods:
             ep.methods.append(method)
+            changed = True
+        if is_graphql and not ep.is_graphql:
+            ep.is_graphql = True
             changed = True
 
         # Only link parameters that originate from THIS observation,
@@ -209,6 +266,7 @@ class ApplicationModel:
                     name=name,
                     location="query",
                     type_inferred=self._infer_type(value),
+                    semantic=self._infer_semantic(name, self._infer_type(value)),
                 )
                 changed = True
 
@@ -220,6 +278,7 @@ class ApplicationModel:
                         name=name,
                         location="body",
                         type_inferred=self._infer_type(value),
+                        semantic=self._infer_semantic(name, self._infer_type(value)),
                     )
                     changed = True
 
@@ -232,10 +291,29 @@ class ApplicationModel:
                         name=f"path_{i}",
                         location="path",
                         type_inferred=self._infer_type(part),
+                        semantic="id_ref",
                     )
                     changed = True
 
         return changed
+
+    @staticmethod
+    def _infer_semantic(name: str, type_inferred: str) -> str | None:
+        """Infer semantic category from parameter name."""
+        n = name.lower()
+        if re.search(r'\b(file|filename|filepath|dir|folder|document|resource|include|load|read|path)\b', n):
+            return "file_path"
+        if re.search(r'\b(url|redirect|next|return|goto|callback|dest|destination|target|forward|continue)\b', n):
+            return "url_redirect"
+        if re.search(r'\b(template|view|render|layout|theme|skin|widget|page)\b', n):
+            return "template_expr"
+        if re.search(r'\b(xml|soap|wsdl)\b', n):
+            return "xml_input"
+        if re.search(r'\b(password|passwd|secret|token|api_key|apikey|auth)\b', n):
+            return "credential"
+        if type_inferred in ("integer", "uuid"):
+            return "id_ref"
+        return None
 
     # ── data object inference ─────────────────────────────
 
@@ -249,7 +327,7 @@ class ApplicationModel:
         schema_key = str(sorted((k, v) for k, v in schema.items()))
 
         if schema_key not in self._objects:
-            obj = DataObjectNode(schema=schema, sensitivity="public")
+            obj = DataObjectNode(schema=schema, sensitivity=_infer_sensitivity(schema))
             self._objects[schema_key] = obj
             self._detect_affects_object(obs, obj)
             return True
@@ -382,7 +460,10 @@ class ApplicationModel:
             role_name = next(
                 (t[5:] for t in source_obs.tags if t.startswith("role:")), "anonymous"
             )
-            synthetic_req = normalize_request(method="GET", url=url)
+            # Utiliser la méthode de la requête source qui a retourné ce lien HATEOAS.
+            # Stocker systématiquement en GET masquait les endpoints découverts via POST.
+            source_method = source_obs.request.method if source_obs.request else "GET"
+            synthetic_req = normalize_request(method=source_method, url=url)
             bucket.append((role_name, synthetic_req))
 
     def _extract_links_from_body(self, obs: RawObservation) -> list[str]:
@@ -452,6 +533,10 @@ class ApplicationModel:
 
     # ── public API ────────────────────────────────────────
 
+    def get_flow_map(self):
+        """Retourne le DataFlowMap courant (non inclus dans snapshot())."""
+        return self._last_flow_map
+
     def snapshot(self) -> ApplicationModelData:
         return ApplicationModelData(
             endpoints=list(self._endpoints.values()),
@@ -461,6 +546,8 @@ class ApplicationModel:
             relations=self._relations,
             last_updated=self._last_updated,
             fsm=self._fsm,
+            tech_stack=sorted(self._tech_stack),
+            detected_content_types=sorted(self._detected_content_types),
         )
 
     def update_role_mapping(

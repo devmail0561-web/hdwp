@@ -85,10 +85,13 @@ async def test_generates_hypothesis_from_role_separation_property() -> None:
     await bus.emit(PROPERTY_INFERRED, prop.model_dump(), source="test")
     await bus.drain()
 
-    assert len(received) == 1
-    hyp_data = received[0].payload
-    mutation_types = [e["mutation_type"] for e in hyp_data["required_experiments"]]
-    assert "privilege_escalation" in mutation_types
+    assert len(received) >= 1
+    # Vérifier que la première hypothèse contient privilege_escalation
+    privilege_hyps = [
+        r for r in received
+        if any(e["mutation_type"] == "privilege_escalation" for e in r.payload["required_experiments"])
+    ]
+    assert privilege_hyps, "Expected at least one privilege_escalation hypothesis"
 
 
 @pytest.mark.asyncio

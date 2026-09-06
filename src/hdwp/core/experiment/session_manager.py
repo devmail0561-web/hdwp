@@ -54,11 +54,12 @@ class SessionManager:
             sm.check_token_expired(resp, "user_a")
     """
 
-    def __init__(self, roles: list[RoleConfig]) -> None:
+    def __init__(self, roles: list[RoleConfig], proxy_url: str | None = None) -> None:
         self._roles: dict[str, RoleConfig] = {r.name: r for r in roles}
         self._clients: dict[str, httpx.AsyncClient] = {}
         self._csrf_tokens: dict[str, str] = {}
         self._lock: asyncio.Lock = asyncio.Lock()
+        self._proxy_url = proxy_url
         # OAuth2 clients — initialisés pour les rôles avec type oauth2_*
         # TYPE_CHECKING import only; runtime import deferred to avoid circular deps
         self._oauth_clients: dict[str, Any] = {}  # dict[str, OAuth2Client]
@@ -70,11 +71,9 @@ class SessionManager:
                 self._oauth_clients[r.name] = OAuth2Client(r.credentials)
 
     async def __aenter__(self) -> Self:
+        from hdwp.core.http_client import build_client
         for role in self._roles.values():
-            self._clients[role.name] = httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=httpx.Timeout(15.0),
-            )
+            self._clients[role.name] = build_client(proxy_url=self._proxy_url)
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -87,10 +86,8 @@ class SessionManager:
 
     def get_client(self, role_name: str) -> httpx.AsyncClient:
         if role_name not in self._clients:
-            self._clients[role_name] = httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=httpx.Timeout(15.0),
-            )
+            from hdwp.core.http_client import build_client
+            self._clients[role_name] = build_client(proxy_url=self._proxy_url)
         return self._clients[role_name]
 
     def build_auth_headers(self, role_name: str) -> dict[str, str]:
@@ -158,10 +155,8 @@ class SessionManager:
             if role.name in self._roles:
                 return  # already registered — idempotent
             self._roles[role.name] = role
-            self._clients[role.name] = httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=httpx.Timeout(15.0),
-            )
+            from hdwp.core.http_client import build_client
+            self._clients[role.name] = build_client(proxy_url=self._proxy_url)
             # Si OAuth2, créer le client OAuth2
             if role.credentials and role.credentials.type in (
                 "oauth2_password", "oauth2_client_credentials"

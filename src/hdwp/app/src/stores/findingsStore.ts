@@ -12,7 +12,9 @@ interface FindingsStore {
 export const useFindingsStore = create<FindingsStore>((set) => ({
   findings: [],
   loading: false,
-  addFinding: (f) => set((s) => ({ findings: [...s.findings, f] })),
+  addFinding: (f) => set((s) => ({
+    findings: s.findings.some(e => e.id === f.id) ? s.findings : [...s.findings, f],
+  })),
   setFindings: (findings) => set({ findings }),
   fetchFindings: async () => {
     set({ loading: true })

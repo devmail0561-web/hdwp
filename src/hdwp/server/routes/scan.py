@@ -24,7 +24,7 @@ async def start_scan(request: Request) -> ScanStatusResponse:
         raise HTTPException(409, "Scan déjà en cours")
 
     from hdwp.server.event_bridge import EventBridge
-    bridge = EventBridge(session.bus, srv.ws_manager)
+    bridge = EventBridge(session.bus, srv.ws_manager, session_id=session.session_id)
     bridge.attach()
 
     # Mise à jour de la phase en temps réel depuis les événements du bus
@@ -104,12 +104,25 @@ async def start_scan(request: Request) -> ScanStatusResponse:
             session.findings_count = len(findings)
             session.phase = "DONE"
             session.set_status("done")
+
+            from hdwp.core.bus.events import SCAN_COMPLETED, HDWPEvent
+            await session.bus.emit(SCAN_COMPLETED, HDWPEvent(
+                type=SCAN_COMPLETED, source="engine",
+                payload={"findings_count": len(findings)},
+            ))
+
             await engine.close()
         except Exception as exc:
             log.error("scan.failed", error=str(exc), exc_info=True)
             session.error_message = str(exc)
             session.phase = "ERROR"
             session.set_status("error")
+
+            from hdwp.core.bus.events import SCAN_ERROR, HDWPEvent as _Evt
+            await session.bus.emit(SCAN_ERROR, _Evt(
+                type=SCAN_ERROR, source="engine",
+                payload={"error": str(exc)},
+            ))
             if session.engine:
                 try:
                     await session.engine.close()
@@ -138,6 +151,13 @@ async def stop_scan(request: Request) -> dict:
         raise HTTPException(404, "Aucune session active")
     if session.task and not session.task.done():
         session.task.cancel()
+        # Wait for the task to finish unwinding before touching the engine.
+        # Without this await, engine.close() races with _run()'s active use of
+        # the engine (which hasn't yet received its CancelledError).
+        try:
+            await session.task
+        except (asyncio.CancelledError, Exception):
+            pass
     if session.engine:
         try:
             await session.engine.close()

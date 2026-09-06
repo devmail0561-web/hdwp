@@ -19,6 +19,7 @@ from hdwp.core.model.schemas import (
     NormalizedRequest,
     PropertyType,
     SecurityProperty,
+    generate_id,
 )
 
 if TYPE_CHECKING:
@@ -27,6 +28,89 @@ if TYPE_CHECKING:
     from hdwp.store.repository import Repository
 
 logger = structlog.get_logger()
+
+
+def _expand_hypotheses_per_endpoint(
+    hypotheses: list[Hypothesis],
+    model: ApplicationModelData,
+) -> list[Hypothesis]:
+    """Duplique chaque hypothèse pour chaque endpoint qui possède le paramètre cible.
+
+    Problème résolu : les plugins génèrent une hypothèse par paramètre (sans endpoint),
+    mais `plan_field_injection` retourne seulement le premier corpus entry.
+    Sans cette expansion, tous les endpoints avec `param=id` ne reçoivent qu'un test
+    alors que le premier trouvé absorbe tous les tests SQLi, XSS, etc.
+
+    Résultat : chaque (endpoint_path × mutation_type × param_name) est une hypothèse
+    indépendante avec son propre cycle oracle.
+    """
+    # Construire un index param_id → liste d'endpoints
+    param_to_endpoints: dict[str, list[str]] = {}
+    for ep in (model.endpoints or []):
+        for pid in (ep.parameters or []):
+            param_to_endpoints.setdefault(pid, []).append(ep.path)
+
+    # Construire un index param_name × location → liste de param_ids
+    name_loc_to_ids: dict[tuple[str, str], list[str]] = {}
+    for p in (model.parameters or []):
+        name_loc_to_ids.setdefault((p.name, p.location), []).append(p.id)
+
+    expanded: list[Hypothesis] = []
+    for hyp in hypotheses:
+        exps = hyp.required_experiments or []
+        if not exps:
+            expanded.append(hyp)
+            continue
+
+        # Vérifier si toutes les expériences ont déjà un endpoint_path
+        already_scoped = all(
+            exp.mutation_params.get("endpoint_path")
+            or exp.mutation_params.get("target_endpoint")
+            for exp in exps
+        )
+        if already_scoped:
+            expanded.append(hyp)
+            continue
+
+        # Trouver les endpoints concernés par le premier experiment avec param_name
+        first_exp = exps[0]
+        param_name = first_exp.mutation_params.get("parameter_name", "")
+        param_loc = first_exp.mutation_params.get("parameter_location", "query")
+
+        if not param_name:
+            expanded.append(hyp)
+            continue
+
+        # Résoudre les endpoints via param_id → endpoint
+        param_ids = name_loc_to_ids.get((param_name, param_loc), [])
+        endpoint_paths: list[str] = []
+        for pid in param_ids:
+            endpoint_paths.extend(param_to_endpoints.get(pid, []))
+
+        # Dédupliquer en préservant l'ordre
+        seen: set[str] = set()
+        unique_endpoints = [p for p in endpoint_paths if not (p in seen or seen.add(p))]  # type: ignore[func-returns-value]
+
+        if not unique_endpoints:
+            # Paramètre sans endpoint connu — conserver l'hypothèse telle quelle
+            expanded.append(hyp)
+            continue
+
+        # Créer une hypothèse par endpoint
+        for ep_path in unique_endpoints:
+            new_exps = []
+            for exp in exps:
+                new_params = {**exp.mutation_params, "endpoint_path": ep_path}
+                new_exps.append(exp.model_copy(update={"mutation_params": new_params}))
+
+            new_hyp = hyp.model_copy(update={
+                "id": generate_id("HYP"),
+                "statement": f"[{ep_path}] {hyp.statement}",
+                "required_experiments": new_exps,
+            })
+            expanded.append(new_hyp)
+
+    return expanded
 
 
 class HypothesisEngine:
@@ -47,6 +131,9 @@ class HypothesisEngine:
     ) -> None:
         self._bus = bus
         self._hypotheses: dict[str, Hypothesis] = {}
+        # Clés de déduplication : (endpoint_path, mutation_type, param_name)
+        # Plus précis que (property_id, statement) qui laisse passer des doublons
+        self._seen_keys: set[tuple[str, str, str]] = set()
         self._prioritizer = prioritizer or HypothesisPrioritizer()
         self._model_accessor = model_accessor
         self._plugin_registry = plugin_registry
@@ -70,7 +157,13 @@ class HypothesisEngine:
                 for plugin in self._plugin_registry.list_enabled():
                     try:
                         plugin_hyps = plugin.generate_hypotheses(model)
-                        hypotheses.extend(plugin_hyps)
+                        # Expand each hypothesis to be endpoint-specific:
+                        # une hypothèse sans endpoint_path dans ses expériences est
+                        # dupliquée pour chaque endpoint qui possède le paramètre cible.
+                        # Cela garantit que TOUTES les vulnérabilités sont testées sur
+                        # CHAQUE endpoint, pas seulement sur le premier match du corpus.
+                        expanded = _expand_hypotheses_per_endpoint(plugin_hyps, model)
+                        hypotheses.extend(expanded)
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("plugin.generate_hypotheses_failed", plugin_id=plugin.id, error=str(exc))
 
@@ -97,6 +190,7 @@ class HypothesisEngine:
         for hyp in hypotheses:
             if not self._is_duplicate(hyp):
                 self._hypotheses[hyp.id] = hyp
+                self._register_hypothesis_keys(hyp)
                 if self._repository is not None:
                     try:
                         await self._repository.save_hypothesis(hyp)
@@ -133,7 +227,7 @@ class HypothesisEngine:
                         required_experiments=[
                             ExperimentSpec(
                                 mutation_type="identity_swap",
-                                base_request=NormalizedRequest(method="GET", url=""),
+                                base_request=NormalizedRequest(method="", url=""),
                                 mutation_params={
                                     "property_id": prop.id,
                                     "model_nodes": prop.model_nodes,
@@ -142,7 +236,7 @@ class HypothesisEngine:
                             ),
                             ExperimentSpec(
                                 mutation_type="object_ref_change",
-                                base_request=NormalizedRequest(method="GET", url=""),
+                                base_request=NormalizedRequest(method="", url=""),
                                 mutation_params={
                                     "property_id": prop.id,
                                     "model_nodes": prop.model_nodes,
@@ -164,6 +258,10 @@ class HypothesisEngine:
                 if self._model_accessor is None:
                     return hypotheses
                 model = self._model_accessor()
+                # Guard: model may be None if the ApplicationModel hasn't been
+                # populated yet (e.g. property event fires before any observation).
+                if model is None:
+                    return hypotheses
                 endpoint_path = ""
                 for ep in model.endpoints:
                     if any(n in prop.model_nodes for n in ([ep.id] + ep.parameters)):
@@ -186,7 +284,7 @@ class HypothesisEngine:
                             required_experiments=[
                                 ExperimentSpec(
                                     mutation_type="privilege_escalation",
-                                    base_request=NormalizedRequest(method="GET", url=""),
+                                    base_request=NormalizedRequest(method="", url=""),
                                     mutation_params={
                                         "property_id": prop.id,
                                         "endpoint_path": endpoint_path,
@@ -214,7 +312,7 @@ class HypothesisEngine:
                 experiments = [
                     ExperimentSpec(
                         mutation_type="field_injection",
-                        base_request=NormalizedRequest(method="GET", url=""),
+                        base_request=NormalizedRequest(method="", url=""),
                         mutation_params={
                             "parameter_name": param_name,
                             "parameter_location": param_location,
@@ -225,7 +323,7 @@ class HypothesisEngine:
                     ),
                     ExperimentSpec(
                         mutation_type="field_injection",
-                        base_request=NormalizedRequest(method="GET", url=""),
+                        base_request=NormalizedRequest(method="", url=""),
                         mutation_params={
                             "parameter_name": param_name,
                             "parameter_location": param_location,
@@ -236,7 +334,7 @@ class HypothesisEngine:
                     ),
                     ExperimentSpec(
                         mutation_type="field_injection",
-                        base_request=NormalizedRequest(method="GET", url=""),
+                        base_request=NormalizedRequest(method="", url=""),
                         mutation_params={
                             "parameter_name": param_name,
                             "parameter_location": param_location,
@@ -323,7 +421,7 @@ class HypothesisEngine:
                     required_experiments=[
                         ExperimentSpec(
                             mutation_type="field_injection",
-                            base_request=NormalizedRequest(method="GET", url=""),
+                            base_request=NormalizedRequest(method="", url=""),
                             mutation_params={
                                 "parameter_name": target_param.name,
                                 "parameter_location": target_param.location,
@@ -358,7 +456,7 @@ class HypothesisEngine:
                     required_experiments=[
                         ExperimentSpec(
                             mutation_type="identity_swap",
-                            base_request=NormalizedRequest(method="GET", url=""),
+                            base_request=NormalizedRequest(method="", url=""),
                             mutation_params={
                                 "property_id": prop.id,
                                 "model_nodes": prop.model_nodes,
@@ -368,6 +466,25 @@ class HypothesisEngine:
                     ],
                 )
             )
+
+        # Method fuzzing : tester toutes les méthodes HTTP sur chaque endpoint
+        if self._model_accessor is not None:
+            model = self._model_accessor()
+            if model is not None:
+                for ep in model.endpoints[:10]:
+                    hypotheses.append(Hypothesis(
+                        source_plugin="core.hypothesis_engine",
+                        property_id=f"PROP-methodfuzz-{ep.id}",
+                        statement=f"L'endpoint {ep.path} n'est accessible qu'aux méthodes documentées",
+                        priority="MEDIUM",
+                        priority_rationale="Method fuzzing : test des méthodes non documentées",
+                        required_experiments=[ExperimentSpec(
+                            mutation_type="http_method_fuzzing",
+                            base_request=NormalizedRequest(method="", url=""),
+                            mutation_params={"endpoint_path": ep.path},
+                            description=f"Test toutes les méthodes HTTP sur {ep.path}",
+                        )],
+                    ))
 
         return hypotheses
 
@@ -386,11 +503,43 @@ class HypothesisEngine:
         return m.group(1) if m else "query"
 
     def _is_duplicate(self, hyp: Hypothesis) -> bool:
+        """Déduplique par (endpoint_path, mutation_type, param_name).
+
+        La clé structurée n'est utilisée que si l'endpoint est connu (ep non-vide).
+        Sans endpoint, on tombe sur la comparaison de statement — ce qui distingue
+        correctement "/api/users vulnérable à sqli" de "/api/orders vulnérable à sqli".
+        Sans cette règle, ("", "sqli", "id") bloquerait le test SQLi sur tous les
+        endpoints ayant un paramètre "id".
+        """
+        for exp in (hyp.required_experiments or []):
+            ep = (
+                exp.mutation_params.get("endpoint_path", "")
+                or exp.mutation_params.get("target_endpoint", "")
+                or exp.mutation_params.get("authenticated_endpoint", "")
+            )
+            # Clé structurée UNIQUEMENT si l'endpoint est connu
+            if ep:
+                param = exp.mutation_params.get("parameter_name", "")
+                if (ep, exp.mutation_type, param) in self._seen_keys:
+                    return True
+        # Fallback sur statement — distingue les endpoints différents
         return any(
-            existing.property_id == hyp.property_id
-            and existing.statement == hyp.statement
+            existing.statement == hyp.statement
             for existing in self._hypotheses.values()
         )
+
+    def _register_hypothesis_keys(self, hyp: Hypothesis) -> None:
+        """Enregistre les clés de déduplication pour une hypothèse acceptée."""
+        for exp in (hyp.required_experiments or []):
+            ep = (
+                exp.mutation_params.get("endpoint_path", "")
+                or exp.mutation_params.get("target_endpoint", "")
+                or exp.mutation_params.get("authenticated_endpoint", "")
+            )
+            # N'enregistrer que si l'endpoint est connu — évite les faux positifs cross-endpoint
+            if ep:
+                param = exp.mutation_params.get("parameter_name", "")
+                self._seen_keys.add((ep, exp.mutation_type, param))
 
     @property
     def hypotheses(self) -> list[Hypothesis]:

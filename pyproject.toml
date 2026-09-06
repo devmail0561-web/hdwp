@@ -15,6 +15,8 @@ authors = [
 
 dependencies = [
     "httpx>=0.28",
+    "socksio>=1.0",
+    "pywebview>=5.0",
     "pyee>=9.0",
     "sqlmodel>=0.0.22",
     "typer>=0.12",
@@ -30,7 +32,8 @@ dependencies = [
 [project.optional-dependencies]
 proxy = ["mitmproxy>=12.0"]
 llm = ["anthropic>=0.40", "openai>=1.0"]
-native = ["pywebview>=5.0"]
+native = []
+spa = ["playwright>=1.40"]
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=0.24",
@@ -55,7 +58,31 @@ hdwp = "hdwp.cli.main:app"
 "core.injection.sqli" = "hdwp.plugins.core.injection.sqli:SQLiPlugin"
 "core.injection.xss" = "hdwp.plugins.core.injection.xss:XSSPlugin"
 "core.injection.ssti" = "hdwp.plugins.core.injection.ssti:SSTIPlugin"
+"core.injection.cmdi" = "hdwp.plugins.core.injection.cmdi:CMDiPlugin"
+"core.injection.mass_assignment" = "hdwp.plugins.core.injection.mass_assignment:MassAssignmentPlugin"
+"core.injection.path_traversal" = "hdwp.plugins.core.injection.path_traversal:PathTraversalPlugin"
+"core.injection.nosqli" = "hdwp.plugins.core.injection.nosqli:NoSQLiPlugin"
+"core.information_flow.open_redirect" = "hdwp.plugins.core.information_flow.open_redirect:OpenRedirectPlugin"
+"core.business_invariant.business_boundary" = "hdwp.plugins.core.business_invariant.business_boundary:BusinessBoundaryPlugin"
+"core.authorization.method_override" = "hdwp.plugins.core.authorization.method_override:MethodOverridePlugin"
 "core.temporal.session_replay" = "hdwp.plugins.core.temporal.session_replay:SessionReplayPlugin"
+# Nouveaux plugins — CWEs non couverts
+"core.injection.xxe" = "hdwp.plugins.core.injection.xxe:XXEPlugin"
+"core.injection.graphql" = "hdwp.plugins.core.injection.graphql:GraphQLPlugin"
+"core.injection.crlf" = "hdwp.plugins.core.injection.crlf_injection:CRLFPlugin"
+"core.injection.deserialization" = "hdwp.plugins.core.injection.deserialization:DeserializationPlugin"
+"core.injection.ldap_injection" = "hdwp.plugins.core.injection.ldap_injection:LDAPInjectionPlugin"
+"core.injection.xpath_injection" = "hdwp.plugins.core.injection.xpath_injection:XPathInjectionPlugin"
+"core.injection.el_injection" = "hdwp.plugins.core.injection.el_injection:ELInjectionPlugin"
+"core.injection.prototype_pollution" = "hdwp.plugins.core.injection.prototype_pollution:PrototypePollutionPlugin"
+"core.authorization.bfla" = "hdwp.plugins.core.authorization.bfla:BFLAPlugin"
+"core.authorization.csrf" = "hdwp.plugins.core.authorization.csrf:CSRFPlugin"
+"core.session_property.session_fixation" = "hdwp.plugins.core.session_property.session_fixation:SessionFixationPlugin"
+"core.file_operations.file_upload" = "hdwp.plugins.core.file_operations.file_upload:FileUploadPlugin"
+"core.configuration.security_headers" = "hdwp.plugins.core.configuration.security_headers:SecurityHeadersPlugin"
+"core.configuration.cache_poisoning" = "hdwp.plugins.core.configuration.cache_poisoning:CachePoisoningPlugin"
+"core.configuration.http_smuggling" = "hdwp.plugins.core.configuration.http_smuggling:HTTPSmugglingPlugin"
+"core.information_flow.http_parameter_pollution" = "hdwp.plugins.core.information_flow.http_parameter_pollution:HTTPParameterPollutionPlugin"
 
 [project.entry-points."hdwp.inference"]
 authorization   = "hdwp.core.property_engine.inference.authorization:AuthorizationInference"

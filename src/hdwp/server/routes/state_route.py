@@ -21,12 +21,17 @@ async def get_state(request: Request) -> StateResponse:
     endpoint_count = 0
     hypothesis_count = 0
     model_confidence = 0.0
+    property_count = 0
+    experiment_count = 0
     if session.engine:
         try:
             snap = session.engine._app_model.snapshot()
             endpoint_count = len(snap.endpoints)
             hypothesis_count = len(session.engine._hyp_engine.hypotheses)
             model_confidence = session.engine._app_model.model_confidence
+            if session.engine._prop_engine:
+                property_count = len(session.engine._prop_engine.properties)
+            experiment_count = len(session.engine._exp_engine._results_buffer)
         except Exception:
             pass
 
@@ -39,6 +44,8 @@ async def get_state(request: Request) -> StateResponse:
         endpoint_count=endpoint_count,
         hypothesis_count=hypothesis_count,
         findings_count=session.findings_count,
+        property_count=property_count,
+        experiment_count=experiment_count,
         proxy_active=session.proxy_active,
         error_message=session.error_message,
     )

@@ -64,7 +64,11 @@ def _setup_proxy() -> None:
     Silencieux si tout est déjà en place.
     """
     try:
-        from hdwp.core.observation.ca_installer import ensure_certutil, install_ca_everywhere
+        from hdwp.core.observation.ca_installer import (
+            ensure_certutil,
+            install_ca_everywhere,
+            is_ca_already_installed,
+        )
         from hdwp.core.observation.hdwp_proxy import CA_CERT_PATH, _load_or_create_ca
 
         # Étape 1 : certutil (libnss3-tools)
@@ -73,12 +77,14 @@ def _setup_proxy() -> None:
         # Étape 2 : CA
         _load_or_create_ca()
 
-        # Étape 3 : installation dans les navigateurs (certutil dispo + sudo disponible ici)
-        if CA_CERT_PATH.exists():
+        # Étape 3 : installation uniquement si pas déjà en place
+        if CA_CERT_PATH.exists() and not is_ca_already_installed(CA_CERT_PATH):
             results = install_ca_everywhere(CA_CERT_PATH)
             ok = [k for k, v in results.items() if v.get("ok")]
             if ok:
                 log.info("proxy.ca_installed_on_startup", browsers=ok)
+        else:
+            log.debug("proxy.ca_already_installed")
     except Exception as exc:
         log.debug("proxy.setup_error", error=str(exc))
 
@@ -141,18 +147,18 @@ def _wait_for_health(url: str, timeout: float = 10.0) -> bool:
 
 
 def _open_window(url: str) -> None:
-    """Ouvre pywebview (natif) ou le navigateur système comme fallback."""
+    """Ouvre l'interface via pywebview (natif) ou le navigateur système en fallback."""
     try:
-        import pywebview  # type: ignore[import-untyped]
-        pywebview.create_window(
+        import webview  # pywebview installe le module sous le nom 'webview'
+        webview.create_window(
             "HDWP Engine",
             url,
             width=1440,
             height=900,
             min_size=(1024, 600),
         )
-        # pywebview.start() DOIT être appelé depuis le thread principal (macOS/Windows)
-        pywebview.start()
+        # webview.start() DOIT être appelé depuis le thread principal (macOS/Windows)
+        webview.start()
     except ImportError:
         log.warning("launcher.pywebview_not_installed", fallback="browser")
         import webbrowser

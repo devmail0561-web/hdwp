@@ -78,9 +78,26 @@ class ExperimentEngine:
         # Semaphore: limite les expériences concurrentes pour ne pas flood la cible
         self._semaphore = asyncio.Semaphore(max_concurrent)
     async def run_pending(self, hypotheses: list[Hypothesis]) -> None:
-        """Execute all hypotheses concurrently, limited by semaphore.
-        Appelé APRÈS le crawl pour garantir un corpus complet (évite les plans vides)."""
-        await asyncio.gather(*[self._run_with_semaphore(hyp) for hyp in hypotheses])
+        """Execute hypotheses en respectant la priorité HIGH-before-LOW.
+
+        asyncio.gather créerait toutes les coroutines simultanément, permettant
+        aux hypothèses LOW de voler les slots semaphore avant les HIGH.
+        On utilise une queue de priorité pour que les slots soient toujours
+        accordés aux hypothèses de plus haute priorité en attente.
+        """
+        if not hypotheses:
+            return
+        # hypotheses est déjà trié par priorité (HIGH en premier) par l'appelant.
+        # On crée les tâches séquentiellement dans l'ordre pour que le semaphore
+        # soit acquis dans l'ordre de soumission tant que les slots sont libres.
+        tasks = []
+        for hyp in hypotheses:
+            task = asyncio.ensure_future(self._run_with_semaphore(hyp))
+            tasks.append(task)
+            # Céder le contrôle pour que les tâches HIGH déjà créées démarrent
+            # et acquièrent le semaphore avant d'en créer de nouvelles.
+            await asyncio.sleep(0)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _run_with_semaphore(self, hyp: Hypothesis) -> None:
         async with self._semaphore:
@@ -240,6 +257,33 @@ class ExperimentEngine:
             replayed_from=replayed_from,
             timestamp=datetime.now(UTC).isoformat(),
         )
+
+    async def execute_single(
+        self,
+        request: NormalizedRequest,
+        role_name: str = "anonymous",
+        chain_type: str = "chain",
+    ) -> ExperimentResult:
+        """Exécute une seule requête HTTP avec auth. Utilisé par le ChainEngine."""
+        from hdwp.core.model.schemas import ExperimentSpec
+        placeholder_spec = ExperimentSpec(
+            mutation_type=chain_type,
+            base_request=request,
+            mutation_params={"chain_type": chain_type},
+            description=f"Chain step [{chain_type}]",
+        )
+        result = await self._execute(
+            request,
+            hypothesis_id=f"chain-{chain_type}",
+            spec=placeholder_spec,
+            replayed_from=None,
+            role=role_name,
+        )
+        from hdwp.core.bus.events import EXPERIMENT_RESULT
+        # Passer result.model_dump() directement — le bus encapsule lui-même dans HDWPEvent.
+        # Passer un HDWPEvent comme payload crée une double-encapsulation qui casse les subscribers.
+        await self._bus.emit(EXPERIMENT_RESULT, result.model_dump(), source="chain_engine")
+        return result
 
     def get_results(self, hypothesis_id: str) -> list[ExperimentResult]:
         return self._results_buffer.get(hypothesis_id, [])

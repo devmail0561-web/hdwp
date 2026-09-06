@@ -11,18 +11,25 @@ const SEV_COLORS: Record<string, string> = {
 }
 
 const PHASE_COLORS: Record<string, string> = {
-  IDLE: '#445566', CRAWLING: '#00ccff', MODELLING: '#9966ff',
-  INFERRING: '#ffaa00', HYPOTHESIZING: '#ff8c00',
-  EXPERIMENTING: '#00aaff', ORACLE: '#44ff88', DONE: '#00ff88',
+  IDLE: '#445566', OBSERVE: '#00ccff', MODEL: '#9966ff',
+  INFER: '#ffaa00', HYPOTHESIZE: '#ff8c00',
+  EXPERIMENT: '#00aaff', FINDING: '#44ff88', DONE: '#00ff88',
+  ERROR: '#ff0066',
 }
 
 const PIPELINE = ['OBSERVE', 'MODEL', 'INFER', 'HYPOTHESIZE', 'EXPERIMENT', 'ORACLE', 'FINDING']
 const PIPELINE_COLORS = ['#00ccff', '#9966ff', '#ffaa00', '#ff8c00', '#00aaff', '#44ff88', '#ff0066']
 
+function pipelineIndex(phase: string): number {
+  const idx = PIPELINE.indexOf(phase)
+  return idx >= 0 ? idx : -1
+}
+
 export function StatusPanel() {
-  const { phase, modelConfidence, endpointCount, hypothesisCount, findingsCount, target, proxyActive, authRequiredUrl } = useScanStore()
+  const { phase, modelConfidence, endpointCount, hypothesisCount, findingsCount, propertyCount, errorMessage, target, proxyActive, authRequiredUrl } = useScanStore()
   const { findings } = useFindingsStore()
   const phaseColor = PHASE_COLORS[phase] ?? '#00ff88'
+  const activeIdx = pipelineIndex(phase)
   const [stopping, setStopping] = useState(false)
   const [caInstalling, setCaInstalling] = useState(false)
   const [caResult, setCaResult] = useState('')
@@ -69,6 +76,14 @@ export function StatusPanel() {
         </div>
       </div>
 
+      {/* Error banner */}
+      {phase === 'ERROR' && errorMessage && (
+        <div style={{ padding: '5px 8px', background: '#180606', border: '1px solid #ff0066', margin: '4px 8px', flexShrink: 0 }}>
+          <div style={{ fontSize: 8, color: '#ff0066', letterSpacing: 1, marginBottom: 2 }}>ERREUR</div>
+          <div style={{ fontSize: 8, color: '#ff4466', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{errorMessage}</div>
+        </div>
+      )}
+
       {/* Progression */}
       <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ fontSize: 9, color: 'var(--green-dark)', letterSpacing: 1, marginBottom: 4 }}>── PROGRESSION ──</div>
@@ -87,7 +102,7 @@ export function StatusPanel() {
           { label: 'ENDPOINTS',  value: endpointCount,  color: '#00ccff' },
           { label: 'HYPOTHÈSES', value: hypothesisCount, color: '#ffaa00' },
           { label: 'FINDINGS',   value: findingsCount,  color: '#ff0066' },
-          { label: 'PROPRIÉTÉS', value: '—',            color: 'var(--green)' },
+          { label: 'PROPRIÉTÉS', value: propertyCount,   color: 'var(--green)' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 8, color: 'var(--green-dark)', letterSpacing: 1, marginBottom: 2 }}>{label}</div>
@@ -166,12 +181,22 @@ export function StatusPanel() {
       <div style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ fontSize: 9, color: 'var(--green-dark)', letterSpacing: 1, marginBottom: 3 }}>── PIPELINE ──</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, fontSize: 8 }}>
-          {PIPELINE.map((step, i) => (
-            <span key={step}>
-              <span style={{ color: PIPELINE_COLORS[i] }}>{step}</span>
-              {i < PIPELINE.length - 1 && <span style={{ color: '#1a3a1a' }}> →</span>}
-            </span>
-          ))}
+          {PIPELINE.map((step, i) => {
+            const isActive = i === activeIdx
+            const isDone = activeIdx >= 0 && i < activeIdx
+            const isAllDone = phase === 'DONE' || phase === 'ERROR'
+            const color = (isActive || isDone || isAllDone) ? PIPELINE_COLORS[i] : '#1a3a1a'
+            return (
+              <span key={step}>
+                <span style={{
+                  color,
+                  fontWeight: isActive ? 'bold' : 'normal',
+                  textDecoration: isActive ? 'underline' : 'none',
+                }}>{step}</span>
+                {i < PIPELINE.length - 1 && <span style={{ color: '#1a3a1a' }}> →</span>}
+              </span>
+            )
+          })}
         </div>
       </div>
 

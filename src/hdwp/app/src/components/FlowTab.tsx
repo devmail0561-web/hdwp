@@ -159,12 +159,12 @@ function DBTablesSection({ tables }: { tables: DBTable[] }) {
 
 export function FlowTab() {
   const { flowMap } = useFlowStore()
-  const { sessionId } = useScanStore()
+  const { sessionId, status } = useScanStore()
 
-  // Fetch on mount and session change
+  // Fetch on mount, session change, and scan completion
   useEffect(() => {
-    if (sessionId) useFlowStore.getState().fetchFlowMap()
-  }, [sessionId])
+    if (sessionId && status !== 'idle') useFlowStore.getState().fetchFlowMap()
+  }, [sessionId, status])
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)

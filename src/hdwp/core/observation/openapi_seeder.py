@@ -63,7 +63,8 @@ async def auto_discover_spec(
     """
     import asyncio
     base = base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=True) as client:
+    from hdwp.core.http_client import build_client
+    async with build_client(timeout=5.0) as client:
         for path in _SWAGGER_DISCOVERY_PATHS:
             if delay_between_requests > 0:
                 await asyncio.sleep(delay_between_requests)
@@ -261,8 +262,9 @@ async def _load_spec(spec_path: str) -> dict[str, Any] | None:
     """Charge une spec OpenAPI depuis un chemin local ou une URL HTTP."""
     try:
         if spec_path.startswith(("http://", "https://")):
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(spec_path, timeout=10.0)
+            from hdwp.core.http_client import build_client
+            async with build_client(timeout=10.0) as client:
+                resp = await client.get(spec_path)
                 resp.raise_for_status()
                 content = resp.text
         else:

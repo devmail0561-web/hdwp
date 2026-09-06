@@ -14,21 +14,23 @@ log = structlog.get_logger()
 class EventBridge:
     """Abonne le bus HDWP et broadcast tous les événements aux clients WebSocket."""
 
-    def __init__(self, bus: AsyncEventBus, ws_manager: WebSocketManager) -> None:
+    def __init__(self, bus: AsyncEventBus, ws_manager: WebSocketManager, session_id: str = "") -> None:
         self._bus = bus
         self._ws_manager = ws_manager
+        self._session_id = session_id
 
     def attach(self) -> None:
         """Enregistre un handler async pour chaque type d'événement.
 
-        Pattern `et=event_type` : capture la valeur courante à chaque
-        itération — évite le bug classique de late-binding en Python.
+        Inclut session_id dans chaque message pour permettre au frontend
+        d'ignorer les événements des sessions inactives.
         """
         for event_type in ALL_EVENT_TYPES:
             async def _handler(event: HDWPEvent, et: str = event_type) -> None:
                 try:
                     await self._ws_manager.broadcast({
                         "type": et,
+                        "session_id": self._session_id,
                         "source": event.source,
                         "ts": event.timestamp,
                         "payload": event.payload if isinstance(event.payload, dict) else {},

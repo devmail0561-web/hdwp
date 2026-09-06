@@ -93,6 +93,8 @@ class _LinkExtractor(HTMLParser):
         self._current_form_action = ""
         self._current_form_method = "GET"
         self._current_form_inputs: dict[str, str] = {}
+        self._pending_select: str = ""
+        self._textarea_name: str = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = dict(attrs)
@@ -119,6 +121,20 @@ class _LinkExtractor(HTMLParser):
                     self._current_form_inputs[name] = value  # garder la valeur originale
                 elif input_type not in ("submit", "reset", "button", "image", "file"):
                     self._current_form_inputs[name] = _INPUT_DEFAULTS.get(input_type, "test")
+        elif tag == "textarea" and self._in_form:
+            name = attr_dict.get("name", "")
+            if name:
+                self._textarea_name = name
+                self._current_form_inputs[name] = "test_content"  # valeur par défaut
+        elif tag == "select" and self._in_form:
+            name = attr_dict.get("name", "")
+            if name:
+                self._pending_select = name
+        elif tag == "option" and self._pending_select:
+            val = attr_dict.get("value", "option1")
+            # Prendre la valeur marquée selected en priorité, sinon la première
+            if self._pending_select not in self._current_form_inputs or "selected" in attr_dict:
+                self._current_form_inputs[self._pending_select] = val
         elif tag == "button":
             fa = attr_dict.get("formaction")
             if fa:
@@ -152,6 +168,12 @@ class _LinkExtractor(HTMLParser):
                 ))
             self._in_form = False
             self._current_form_inputs = {}
+            self._pending_select = ""
+            self._textarea_name = ""
+        elif tag == "select":
+            self._pending_select = ""
+        elif tag == "textarea":
+            self._textarea_name = ""
         elif tag == "script" and self._in_inline_script:
             self._in_inline_script = False
             self.scripts_inline.append("".join(self._inline_buf))
@@ -160,6 +182,9 @@ class _LinkExtractor(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._in_inline_script:
             self._inline_buf.append(data)
+        elif self._textarea_name and self._in_form and data.strip():
+            # Contenu réel d'un textarea (entre les balises ouvrante et fermante)
+            self._current_form_inputs[self._textarea_name] = data.strip()
 
 
 def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
@@ -272,6 +297,8 @@ class ActiveCrawler:
         self._script_contents: dict[str, str] = {}
         self._script_pages: dict[str, list[str]] = {}
         self._form_bodies: dict[str, dict[str, str]] = {}  # url → form fields
+        self._options_probed: set[str] = set()   # chemins déjà sondés par OPTIONS
+        self._methods_probed: set[str] = set()   # chemins déjà sondés pour multi-méthodes
 
     @staticmethod
     def _normalize_path(url: str) -> str:
@@ -295,13 +322,14 @@ class ActiveCrawler:
         base_origin = f"{parsed.scheme}://{parsed.netloc}"
 
         for role in self._roles:
-            async with httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=httpx.Timeout(15.0),
-                headers=_build_auth_headers(role.credentials),
-                proxy=self._proxy_url,
-                verify=not bool(self._proxy_url),
+            from hdwp.core.http_client import build_client
+            # proxy_url = hdwp_proxy MITM (pour interception) — prime sur Tor.
+            # Si aucun proxy MITM, build_client() injecte Tor automatiquement.
+            async with build_client(
+                timeout=15.0,
+                proxy_url=self._proxy_url,  # None → Tor via module global
             ) as client:
+                client.headers.update(_build_auth_headers(role.credentials) or {})
                 # Consulter robots.txt et sitemap avant le BFS
                 extra_seeds = await self._seed_from_robots_sitemap(client, base_origin, seed_url)
                 await self._crawl_as_role(client, seed_url, role, base_origin, extra_seeds)
@@ -423,6 +451,12 @@ class ActiveCrawler:
                 await self._bus.emit(OBSERVATION_RAW, obs.model_dump(), source="active_crawler")
             pages_visited += 1
 
+            # Sonder OPTIONS pour découvrir les méthodes autorisées et headers CORS
+            # Sonder POST/PUT/PATCH pour alimenter le corpus avec des méthodes non-GET
+            if resp.status_code < 400 and method == "GET":
+                await self._probe_options(client, url)
+                await self._probe_methods(client, url, role.name)
+
             content_type = resp.headers.get("content-type", "")
 
             # ── Link header (RFC 5988) ────────────────────────────────────
@@ -465,11 +499,13 @@ class ActiveCrawler:
                 extractor = js_extractor_cls()
                 for inline_src in extract_inline_scripts(resp.text):
                     if inline_src.strip():
-                        api_urls = extractor.extract_endpoints(inline_src, url)
-                        for api_url in api_urls:
+                        api_endpoints = extractor.extract_endpoints(inline_src, url)
+                        for api_url, js_method in api_endpoints:
                             if api_url not in visited:
-                                queue.append((api_url, depth + 1, "GET", current_pattern))
-                        if not api_urls and self._llm_layer is not None:
+                                # "WS" (WebSocket) ne passe pas dans la queue HTTP
+                                queue_method = js_method if js_method != "WS" else "GET"
+                                queue.append((api_url, depth + 1, queue_method, current_pattern))
+                        if not api_endpoints and self._llm_layer is not None:
                             await self._llm_enrich(inline_src, url, visited, queue)
 
             elif "application/json" in content_type or "text/json" in content_type:
@@ -484,10 +520,11 @@ class ActiveCrawler:
                     from hdwp.core.observation.js_extractor import JSExtractor
                     js_extractor_cls = JSExtractor
                 extractor = js_extractor_cls()
-                api_urls = extractor.extract_endpoints(resp.text, url)
-                for api_url in api_urls:
+                api_endpoints = extractor.extract_endpoints(resp.text, url)
+                for api_url, js_method in api_endpoints:
                     if api_url not in visited:
-                        queue.append((api_url, depth + 1, "GET", ""))
+                        queue_method = js_method if js_method != "WS" else "GET"
+                        queue.append((api_url, depth + 1, queue_method, ""))
 
         log.info(
             "crawl.complete",
@@ -495,6 +532,94 @@ class ActiveCrawler:
             pages_visited=pages_visited,
             urls_found=len(visited),
         )
+
+    async def _probe_options(self, client: httpx.AsyncClient, url: str) -> None:
+        """Émet une requête OPTIONS pour découvrir Allow/CORS — une seule fois par chemin normalisé."""
+        key = self._normalize_path(url)
+        if key in self._options_probed:
+            return
+        self._options_probed.add(key)
+        try:
+            r = await client.request("OPTIONS", url, timeout=5.0)
+            allow_hdr = r.headers.get("allow", "")
+            acao_hdr = r.headers.get("access-control-allow-origin", "")
+            if not allow_hdr and not acao_hdr:
+                return
+            norm_req = normalize_request(method="OPTIONS", url=url, headers={}, body=None)
+            norm_resp = normalize_response(
+                status_code=r.status_code,
+                headers=dict(r.headers),
+                body=None,
+                timing_ms=0.0,
+            )
+            obs = RawObservation(
+                timestamp=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                source="active",
+                type=ObservationType.HTTP,
+                request=norm_req,
+                response=norm_resp,
+                session_id=self._session_id,
+                tags=["options_probe", f"allow:{allow_hdr}" if allow_hdr else "cors_discovered"],
+            )
+            if self._emit_observations:
+                await self._bus.emit(OBSERVATION_RAW, obs.model_dump(), source="active_crawler")
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _probe_methods(self, client: httpx.AsyncClient, url: str, role_name: str) -> None:
+        """Sonde POST/PUT/PATCH sur chaque endpoint GET découvert.
+
+        Alimente le corpus avec des observations de méthodes non-GET,
+        ce qui permet à l'expérimentation de tester ces méthodes
+        sans spec OpenAPI ni proxy capturant du trafic réel.
+
+        Règles :
+        - DELETE exclu (destructif)
+        - 405 Method Not Allowed → méthode non supportée, skip
+        - 2xx / 4xx (sauf 405) → méthode acceptée (même si requiert un corps),
+          l'observation est émise et alimente le corpus
+        """
+        key = self._normalize_path(url)
+        if key in self._methods_probed:
+            return
+        self._methods_probed.add(key)
+
+        for method in ("POST", "PUT", "PATCH"):
+            try:
+                r = await client.request(
+                    method, url,
+                    json={},
+                    headers={"Content-Type": "application/json"},
+                    timeout=5.0,
+                )
+                # 405 = méthode explicitement refusée → inutile à tester
+                if r.status_code == 405:
+                    continue
+                # Toute autre réponse (200/201/400/401/403/422) = méthode connue du serveur
+                norm_req = normalize_request(
+                    method=method, url=url,
+                    headers={"Content-Type": "application/json"},
+                    body={},
+                )
+                norm_resp = normalize_response(
+                    status_code=r.status_code,
+                    headers=dict(r.headers),
+                    body=r.text,
+                    timing_ms=0.0,
+                )
+                obs = RawObservation(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    source="active",
+                    type=ObservationType.HTTP,
+                    request=norm_req,
+                    response=norm_resp,
+                    session_id=self._session_id,
+                    tags=[f"role:{role_name}", "source:method_probe"],
+                )
+                if self._emit_observations:
+                    await self._bus.emit(OBSERVATION_RAW, obs.model_dump(), source="active_crawler")
+            except Exception:  # noqa: BLE001
+                pass
 
     async def _process_js(
         self,
@@ -534,15 +659,16 @@ class ActiveCrawler:
             extractor = extractor_cls()
             # Pour JS externe (CDN), résoudre les chemins relatifs par rapport à la page appelante
             resolve_base = page_url if not is_in_scope else script_url
-            api_urls = extractor.extract_endpoints(js_resp.text, resolve_base)
+            api_endpoints = extractor.extract_endpoints(js_resp.text, resolve_base)
 
-            for api_url in api_urls:
+            for api_url, js_method in api_endpoints:
                 if api_url not in visited:
                     # N'ajouter à la file que les URLs dans le scope
-                    if self._scope_guard.check(api_url, "GET") == ScopeVerdict.ALLOWED:
-                        queue.append((api_url, depth + 1, "GET", ""))
+                    queue_method = js_method if js_method != "WS" else "GET"
+                    if self._scope_guard.check(api_url, queue_method) == ScopeVerdict.ALLOWED:
+                        queue.append((api_url, depth + 1, queue_method, ""))
 
-            if not api_urls and self._llm_layer is not None:
+            if not api_endpoints and self._llm_layer is not None:
                 await self._llm_enrich(js_resp.text, page_url, visited, queue)
 
         except Exception:  # noqa: BLE001

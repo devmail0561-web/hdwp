@@ -167,6 +167,58 @@ def _gen_cert_for_host(hostname: str, ca_cert: object, ca_key: object) -> tuple[
     return cert_path, key_path
 
 
+# ── JS error collector injection ─────────────────────────────────────────────
+
+_JS_COLLECTOR_SNIPPET = b"""<script>
+(function(){var _e=[];
+  var _orig=console.error;console.error=function(){_e.push({t:'e',m:[].join.call(arguments,' ')});_orig.apply(this,arguments);};
+  window.onerror=function(m,s,l){_e.push({t:'ex',m:m,src:s,line:l});return false;};
+  window.addEventListener('unhandledrejection',function(ev){_e.push({t:'rej',m:String(ev.reason)});});
+  setInterval(function(){if(_e.length){try{navigator.sendBeacon('/__hdwp_console__',JSON.stringify(_e.splice(0)));}catch(e){};}},2000);
+})();
+</script>"""
+
+
+def _inject_js_if_html(
+    resp_headers: dict[str, str], resp_body: bytes
+) -> tuple[bytes, dict[str, str]]:
+    """Inject JS error collector into HTML responses. Returns (new_body, updated_headers)."""
+    ct = resp_headers.get("content-type", "").lower()
+    if "text/html" not in ct:
+        return resp_body, resp_headers
+
+    encoding = resp_headers.get("content-encoding", "").lower()
+    body = resp_body
+    modified_headers = dict(resp_headers)
+
+    if "gzip" in encoding:
+        import gzip as _gz
+        try:
+            body = _gz.decompress(resp_body)
+            modified_headers.pop("content-encoding", None)
+            modified_headers.pop("Content-Encoding", None)
+        except Exception:
+            return resp_body, resp_headers
+    elif encoding and encoding not in ("identity", ""):
+        return resp_body, resp_headers  # unknown encoding, skip
+
+    lower = body.lower()
+    idx = lower.rfind(b"</body>")
+    if idx == -1:
+        return resp_body, resp_headers
+
+    body = body[:idx] + _JS_COLLECTOR_SNIPPET + body[idx:]
+    modified_headers["content-length"] = str(len(body))
+    return body, modified_headers
+
+
+def _headers_dict_to_raw(headers: dict[str, str]) -> bytes:
+    """Reconstruct raw header bytes from a dict (for after injection)."""
+    return b"".join(
+        f"{k}: {v}\r\n".encode("latin-1") for k, v in headers.items()
+    )
+
+
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 def _parse_request_line(line: bytes) -> tuple[str, str, str]:
@@ -177,11 +229,20 @@ def _parse_request_line(line: bytes) -> tuple[str, str, str]:
 
 
 def _parse_headers(raw: bytes) -> dict[str, str]:
+    """Parse response headers — last value wins except Set-Cookie which is joined."""
     headers: dict[str, str] = {}
+    set_cookies: list[str] = []
     for line in raw.split(b"\r\n"):
         if b":" in line:
             k, _, v = line.partition(b":")
-            headers[k.strip().decode("latin-1").lower()] = v.strip().decode("latin-1")
+            key = k.strip().decode("latin-1").lower()
+            val = v.strip().decode("latin-1")
+            if key == "set-cookie":
+                set_cookies.append(val)
+            else:
+                headers[key] = val
+    if set_cookies:
+        headers["set-cookie"] = "\n".join(set_cookies)
     return headers
 
 
@@ -197,10 +258,40 @@ async def _read_headers(reader: asyncio.StreamReader) -> tuple[bytes, dict[str, 
 
 
 async def _read_body(reader: asyncio.StreamReader, headers: dict[str, str]) -> bytes:
+    """Lit le body selon Content-Length ou Transfer-Encoding: chunked."""
+    te = headers.get("transfer-encoding", "").lower()
+    if "chunked" in te:
+        return await _read_chunked_body(reader)
     cl = int(headers.get("content-length", "0") or "0")
     if cl > 0:
         return await asyncio.wait_for(reader.read(cl), timeout=30.0)
     return b""
+
+
+async def _read_chunked_body(reader: asyncio.StreamReader) -> bytes:
+    """Lit un body en Transfer-Encoding: chunked et le décode."""
+    chunks: list[bytes] = []
+    try:
+        while True:
+            size_line = await asyncio.wait_for(reader.readline(), timeout=15.0)
+            size_str = size_line.decode("latin-1").strip().split(";")[0]
+            chunk_size = int(size_str, 16)
+            if chunk_size == 0:
+                # Lire les trailers éventuels jusqu'à ligne vide
+                while True:
+                    trailer = await asyncio.wait_for(reader.readline(), timeout=5.0)
+                    if trailer in (b"\r\n", b"\n", b""):
+                        break
+                break
+            # readexactly garantit la lecture de chunk_size octets exacts.
+            # reader.read(n) peut retourner moins d'octets sur lecture TCP partielle,
+            # ce qui corrompt le CRLF séparateur suivant.
+            chunk = await asyncio.wait_for(reader.readexactly(chunk_size), timeout=30.0)
+            chunks.append(chunk)
+            await asyncio.wait_for(reader.readline(), timeout=5.0)  # CRLF après chunk
+    except Exception:
+        pass
+    return b"".join(chunks)
 
 
 async def _pipe(
@@ -350,6 +441,10 @@ class HDWPProxy:
             t_writer.close()
             return
 
+        # Inject JS collector into HTML responses
+        resp_body, resp_headers = _inject_js_if_html(resp_headers, resp_body)
+        resp_headers_raw = _headers_dict_to_raw(resp_headers)
+
         writer.write(resp_status + resp_headers_raw + b"\r\n" + resp_body)
         await writer.drain()
         t_writer.close()
@@ -372,6 +467,14 @@ class HDWPProxy:
 
         host, _, port_str = host_port.partition(":")
         port = int(port_str) if port_str.isdigit() else 443
+
+        # Vérifier le scope avant d'établir le tunnel
+        from hdwp.core.context.scope_guard import ScopeVerdict
+        probe_url = f"https://{host}:{port}/"
+        if self._scope_guard.check(probe_url, "CONNECT") != ScopeVerdict.ALLOWED:
+            writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            await writer.drain()
+            return
 
         writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
         await writer.drain()
@@ -419,7 +522,9 @@ class HDWPProxy:
         tls_reader = asyncio.StreamReader()
         tls_proto = asyncio.StreamReaderProtocol(tls_reader)
         tls_transport.set_protocol(tls_proto)
-        tls_writer = asyncio.StreamWriter(tls_transport, tls_proto, tls_reader, loop)
+        # Python 3.12 a supprimé le paramètre `loop` de asyncio.StreamWriter.
+        # On passe uniquement les 3 arguments requis (transport, protocol, reader).
+        tls_writer = asyncio.StreamWriter(tls_transport, tls_proto, tls_reader)
 
         ssl_cli = ssl.create_default_context()
         ssl_cli.set_alpn_protocols(["http/1.1"])
@@ -481,6 +586,10 @@ class HDWPProxy:
                 resp_body = await _read_body(u_reader, resp_headers)
             except Exception:
                 break
+
+            # Inject JS collector into HTML responses
+            resp_body, resp_headers = _inject_js_if_html(resp_headers, resp_body)
+            resp_headers_raw = _headers_dict_to_raw(resp_headers)
 
             c_writer.write(resp_line + resp_headers_raw + b"\r\n" + resp_body)
             try:

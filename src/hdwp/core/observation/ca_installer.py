@@ -12,6 +12,7 @@ Navigateurs/stores supportés :
 from __future__ import annotations
 
 import glob
+import hashlib
 import platform
 import shutil
 import subprocess
@@ -61,6 +62,53 @@ def ensure_certutil() -> bool:
     return bool(shutil.which("certutil"))
 
 
+def _cert_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _nss_has_ca(db_path: str) -> bool:
+    """Vérifie si le certificat HDWP CA est déjà dans une DB NSS."""
+    certutil = _find_certutil()
+    if not certutil:
+        return False
+    result = subprocess.run(
+        [certutil, "-L", "-d", db_path, "-n", NICKNAME],
+        capture_output=True, timeout=5,
+    )
+    return result.returncode == 0
+
+
+def is_ca_already_installed(ca_cert_path: Path) -> bool:
+    """Retourne True si le CA est déjà installé partout (évite le sudo inutile)."""
+    if not ca_cert_path.exists():
+        return False
+
+    system = platform.system()
+
+    if system == "Linux":
+        # Vérifier le store système
+        dest = Path("/usr/local/share/ca-certificates/hdwp-ca.crt")
+        if not dest.exists() or _cert_hash(dest) != _cert_hash(ca_cert_path):
+            return False
+        # Vérifier au moins une DB NSS
+        dbs = _find_nss_dbs_linux()
+        if dbs and not any(_nss_has_ca(db) for db in dbs.values()):
+            return False
+        return True
+
+    if system == "Darwin":
+        # Vérification légère : certutil présent et au moins un profil Firefox OK
+        dbs = {}
+        home = Path.home()
+        for cert9 in glob.glob(str(home / "Library/Application Support/Firefox/Profiles/*/cert9.db")):
+            profile = Path(cert9).parent
+            dbs[f"sql:{profile}"] = f"sql:{profile}"
+        return bool(dbs) and all(_nss_has_ca(db) for db in dbs)
+
+    # Windows : pas de vérification légère disponible sans WinAPI
+    return False
+
+
 def install_ca_everywhere(ca_cert_path: Path) -> dict[str, dict[str, Any]]:
     """
     Installe le CA dans tous les navigateurs et stores détectés.
@@ -108,12 +156,13 @@ def _install_nss(ca: Path, db_path: str, label: str) -> dict[str, Any]:
             "ok": False,
             "message": "certutil introuvable — sudo apt install libnss3-tools",
         }
-    # Remove old entry silently
-    subprocess.run([certutil, "-D", "-d", db_path, "-n", NICKNAME], capture_output=True)
+    # Remove old entry silently (timeout prevents hang if NSS db is locked)
+    subprocess.run([certutil, "-D", "-d", db_path, "-n", NICKNAME], capture_output=True, timeout=10)
     # Install new entry
     result = subprocess.run(
         [certutil, "-A", "-d", db_path, "-t", "CT,,", "-n", NICKNAME, "-i", str(ca)],
         capture_output=True,
+        timeout=10,
     )
     if result.returncode == 0:
         return {"ok": True, "message": f"Installé dans {label}"}

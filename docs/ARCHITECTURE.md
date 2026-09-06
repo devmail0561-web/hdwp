@@ -1,8 +1,8 @@
 # HDWP Engine — Document d'architecture
 
-**Version :** 0.4.0  
+**Version :** 2.0.0  
 **Auteur :** M. TENDENG  
-**Date :** 2026-09-03
+**Date :** 2026-09-06
 
 ---
 
@@ -496,3 +496,39 @@ src/hdwp/
     ├── models.py                        # SQLModel tables
     └── repository.py                    # Repository async CRUD
 ```
+
+---
+
+## 3. Plugins de détection
+
+**34 plugins actifs** organisés par catégorie CWE/OWASP :
+
+### Authorization
+- `bola` (CWE-639) — BOLA/IDOR via `affects_object`
+- `authz` (CWE-284) — Contrôle d'accès générique
+- `bfla` (CWE-285) — Broken Function Level Authorization
+- `csrf` (CWE-352) — Cross-Site Request Forgery
+- `method_override` (CWE-284) — HTTP Method Override
+
+### Injection
+- `sqli` (CWE-89), `xss` (CWE-79), `ssti` (CWE-94), `cmdi` (CWE-78)
+- `nosqli` (CWE-943), `path_traversal` (CWE-22), `mass_assignment` (CWE-915)
+- `xxe` (CWE-611), `graphql` (CWE-200/284), `crlf` (CWE-113)
+- `deserialization` (CWE-502), `ldap_injection` (CWE-90), `xpath_injection` (CWE-643)
+- `el_injection` (CWE-917), `prototype_pollution` (CWE-1321)
+
+### Configuration
+- `cors` (CWE-942), `security_headers` (CWE-693)
+- `cache_poisoning` (CWE-345), `http_smuggling` (CWE-444)
+
+### Information Flow
+- `ssrf` (CWE-918), `open_redirect` (CWE-601), `info_disclosure` (CWE-200)
+- `http_parameter_pollution` (CWE-235)
+
+### Session / Temporal
+- `jwt` (CWE-347), `session_replay` (CWE-613)
+- `session_fixation` (CWE-384)
+
+### Business Logic / File
+- `business_boundary` (CWE-840), `race_condition` (CWE-362)
+- `file_upload` (CWE-434)

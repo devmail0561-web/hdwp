@@ -69,7 +69,11 @@ class CORSPlugin(HDWPPlugin):
 
     def generate_hypotheses(self, model: ApplicationModelData) -> list[Hypothesis]:
         hyps: list[Hypothesis] = []
-        for ep in model.endpoints[:5]:
+        # Prioriser les endpoints authentifiés — éviter le bruit sur endpoints publics
+        auth_endpoints = [ep for ep in model.endpoints if ep.auth_required or ep.roles_observed]
+        # Si aucun endpoint authentifié, tester tous (cas d'une API publique)
+        candidates = (auth_endpoints or model.endpoints)[:5]
+        for ep in candidates:
             hyps.append(
                 Hypothesis(
                     source_plugin=self.id,

@@ -1,0 +1,286 @@
+import { useEffect, useState } from 'react'
+import { useLLMStore } from '../stores/llmStore'
+import { useScanStore } from '../stores/scanStore'
+import type { PayloadFinding } from '../types/hdwp'
+
+const SEV_COLORS: Record<string, string> = {
+  CRITICAL: '#ff0066', HIGH: '#ff4400', MEDIUM: '#ffaa00', LOW: '#00ccff', INFO: '#445566',
+}
+const SEV_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
+
+type ExportTab = 'curl' | 'python' | 'burp'
+
+interface PayloadExport { curl: string; python: string; burp: string }
+interface ConfirmResult { status_code: number; response_excerpt: string; elapsed_ms: number; confirmed: boolean; note?: string; replay_type?: string }
+interface AiContext { available: boolean; explanation?: string; alternative_payloads?: string[]; error?: string }
+
+function Detail({ finding }: { finding: PayloadFinding }) {
+  const { active: llmActive } = useLLMStore()
+  const sevColor = SEV_COLORS[finding.severity] ?? '#445566'
+  const proof = finding.proof as Record<string, unknown>
+  const reproSteps: string[] = Array.isArray(proof?.reproduction_steps) ? proof.reproduction_steps as string[] : []
+  const cveIds: string[] = Array.isArray(proof?.cve_ids) ? proof.cve_ids as string[] : []
+  const mutationType = proof?.mutation_type as string | undefined
+
+  const [exportTab, setExportTab] = useState<ExportTab>('curl')
+  const [payload, setPayload] = useState<PayloadExport | null>(null)
+  const [payloadLoading, setPayloadLoading] = useState(false)
+  const [confirm, setConfirm] = useState<ConfirmResult | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [confirmError, setConfirmError] = useState('')
+  const [aiCtx, setAiCtx] = useState<AiContext | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+
+  useEffect(() => {
+    setPayload(null); setConfirm(null); setConfirmError(''); setAiCtx(null)
+    if (!finding.has_replay) return
+    setPayloadLoading(true)
+    fetch(`/api/payload/${finding.id}/export`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setPayload(d))
+      .catch(() => {})
+      .finally(() => setPayloadLoading(false))
+  }, [finding.id, finding.has_replay])
+
+  const handleConfirm = async () => {
+    setConfirming(true); setConfirm(null); setConfirmError('')
+    try {
+      const r = await fetch(`/api/payload/run/${finding.id}`, { method: 'POST' })
+      if (!r.ok) { setConfirmError(await r.text()); return }
+      setConfirm(await r.json())
+    } catch (e) { setConfirmError(String(e)) }
+    finally { setConfirming(false) }
+  }
+
+  const handleAi = async () => {
+    setAiLoading(true)
+    try {
+      const r = await fetch(`/api/payload/${finding.id}/ai-context`)
+      setAiCtx(r.ok ? await r.json() : { available: false })
+    } catch { setAiCtx({ available: false }) }
+    finally { setAiLoading(false) }
+  }
+
+  const copy = (text: string) => { navigator.clipboard?.writeText(text).catch(() => {}) }
+  const exportContent = payload ? payload[exportTab] : ''
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', padding: '10px 14px', gap: 12 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <span style={{ padding: '2px 8px', background: sevColor + '22', border: `1px solid ${sevColor}`, color: sevColor, fontFamily: 'var(--font-title)', fontSize: 9, letterSpacing: 1 }}>
+          {finding.severity}
+        </span>
+        <span style={{ fontFamily: 'var(--font-title)', fontSize: 11, color: 'var(--text-hl)', letterSpacing: 1 }}>{finding.cwe_id}</span>
+        <span style={{ fontSize: 9, color: '#445566' }}>{finding.owasp_category}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 9, color: '#00ccff' }}>{Math.round(finding.confidence * 100)}%</span>
+      </div>
+
+      {/* Reproduction */}
+      {reproSteps.length > 0 && (
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ fontSize: 8, color: 'var(--green-dark)', letterSpacing: 1, marginBottom: 6 }}>── REPRODUCTION ──</div>
+          <ol style={{ margin: 0, paddingLeft: 18, fontSize: 9, color: 'var(--green-dim)', lineHeight: 1.7 }}>
+            {reproSteps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        </div>
+      )}
+
+      {/* Export payload */}
+      <div style={{ flexShrink: 0 }}>
+        <div style={{ fontSize: 8, color: 'var(--green-dark)', letterSpacing: 1, marginBottom: 6 }}>── PAYLOAD ──</div>
+        {!finding.has_replay || mutationType === 'static_analysis' ? (
+          <div style={{ padding: '8px 10px', background: '#060606', border: '1px solid var(--border)', fontSize: 9, color: '#445566' }}>
+            Vulnérabilité détectée par analyse statique — aucun payload automatique disponible.
+            {cveIds.length > 0 && <span style={{ color: '#ffaa00' }}> CVEs : {cveIds.join(', ')}</span>}
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 0, marginBottom: 0 }}>
+              {(['curl', 'python', 'burp'] as ExportTab[]).map(t => (
+                <button key={t} onClick={() => setExportTab(t)} style={{
+                  padding: '3px 10px', fontSize: 8,
+                  background: exportTab === t ? '#031a10' : 'transparent',
+                  border: '1px solid var(--border)',
+                  borderBottom: exportTab === t ? '2px solid var(--green)' : '1px solid var(--border)',
+                  color: exportTab === t ? 'var(--green)' : '#445566',
+                  fontFamily: 'var(--font-title)', letterSpacing: 1, cursor: 'pointer',
+                }}>
+                  {t}
+                </button>
+              ))}
+              <button onClick={() => copy(exportContent)} style={{
+                marginLeft: 'auto', padding: '3px 8px', fontSize: 7,
+                background: 'transparent', border: '1px solid var(--border)',
+                color: '#445566', fontFamily: 'var(--font-title)', letterSpacing: 1, cursor: 'pointer',
+              }}>COPIER</button>
+            </div>
+            <pre style={{
+              margin: 0, padding: '8px 10px', background: '#060606',
+              border: '1px solid var(--border)', borderTop: 'none',
+              fontSize: 9, color: 'var(--text-hl)', fontFamily: 'var(--font-mono)',
+              overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 100,
+            }}>
+              {payloadLoading ? 'Chargement…' : exportContent || '—'}
+            </pre>
+          </>
+        )}
+      </div>
+
+      {/* Confirmation */}
+      <div style={{ flexShrink: 0 }}>
+        <button
+          onClick={handleConfirm}
+          disabled={!finding.has_replay || confirming}
+          style={{
+            padding: '6px 16px', fontFamily: 'var(--font-title)', fontSize: 9, letterSpacing: 2,
+            background: 'transparent',
+            border: `1px solid ${finding.has_replay ? '#ff4400' : 'var(--border)'}`,
+            color: finding.has_replay ? '#ff4400' : '#445566',
+            cursor: finding.has_replay ? 'pointer' : 'not-allowed',
+          }}
+        >
+          {confirming ? '[ ▶ …]' : finding.replay_type === 'passive' ? '[ ▶ RE-VÉRIFIER ]' : '[ ▶ CONFIRMER LA PREUVE ]'}
+        </button>
+        {confirmError && <div style={{ fontSize: 9, color: '#ff0066', marginTop: 4 }}>⚠ {confirmError}</div>}
+        {confirm && (
+          <div style={{
+            marginTop: 6, padding: '6px 10px', background: '#060606',
+            border: `1px solid ${confirm.confirmed ? '#ff4400' : '#00ff88'}`,
+            fontSize: 9,
+          }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <span style={{ color: confirm.confirmed ? '#ff4400' : '#00ff88', fontFamily: 'var(--font-title)', fontSize: 11 }}>
+                {confirm.replay_type === 'passive' ? (confirm.confirmed ? '● VULNÉRABLE' : '○ CORRIGÉ') : confirm.status_code}
+              </span>
+              <span style={{ color: '#445566' }}>{confirm.elapsed_ms}ms</span>
+            </div>
+            {confirm.note && <div style={{ marginTop: 4, fontSize: 9, color: confirm.confirmed ? '#ff4400' : '#00ff88' }}>{confirm.note}</div>}
+            {confirm.response_excerpt && (
+              <div style={{ marginTop: 4, fontFamily: 'var(--font-mono)', fontSize: 8, color: '#445566', wordBreak: 'break-all' }}>
+                {confirm.response_excerpt.slice(0, 200)}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* AI Context */}
+      {llmActive && (
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ fontSize: 8, color: 'var(--green-dark)', letterSpacing: 1, marginBottom: 6 }}>── ANALYSE IA ──</div>
+          {!aiCtx ? (
+            <button onClick={handleAi} disabled={aiLoading} style={{
+              padding: '4px 12px', background: 'transparent', border: '1px solid var(--border)',
+              color: 'var(--green-dark)', fontFamily: 'var(--font-title)', fontSize: 8, letterSpacing: 1, cursor: 'pointer',
+            }}>
+              {aiLoading ? '[ ANALYSE… ]' : '[ ANALYSE IA ]'}
+            </button>
+          ) : aiCtx.available ? (
+            <div style={{ fontSize: 9, color: 'var(--green-dim)', background: '#060606', border: '1px solid var(--border)', padding: '8px 10px', lineHeight: 1.6 }}>
+              {aiCtx.explanation && <p style={{ margin: '0 0 8px' }}>{aiCtx.explanation}</p>}
+              {aiCtx.alternative_payloads && aiCtx.alternative_payloads.length > 0 && (
+                <>
+                  <div style={{ fontSize: 8, color: '#445566', marginBottom: 4 }}>Payloads alternatifs :</div>
+                  {aiCtx.alternative_payloads.map((p, i) => (
+                    <div key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: '#ffaa00', marginBottom: 2 }}>{p}</div>
+                  ))}
+                </>
+              )}
+            </div>
+          ) : (
+            <div style={{ fontSize: 9, color: '#445566' }}>Analyse IA non disponible.{aiCtx.error && ` (${aiCtx.error})`}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function PayloadTab() {
+  const { sessionId, status } = useScanStore()
+  const [findings, setFindings] = useState<PayloadFinding[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<PayloadFinding | null>(null)
+
+  useEffect(() => {
+    if (!sessionId) { setFindings([]); setLoading(false); return }
+    if (status === 'idle') return
+    setLoading(true)
+    fetch('/api/payload/findings')
+      .then(r => r.ok ? r.json() : [])
+      .then((data: PayloadFinding[]) => setFindings(data))
+      .catch(() => setFindings([]))
+      .finally(() => setLoading(false))
+  }, [sessionId, status])
+
+  const bySeverity = SEV_ORDER.reduce<Record<string, PayloadFinding[]>>((acc, s) => {
+    acc[s] = findings.filter(f => f.severity === s)
+    return acc
+  }, {})
+
+  return (
+    <div style={{ height: '100%', display: 'flex', overflow: 'hidden' }}>
+      <div style={{ width: '38%', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{
+          fontFamily: 'var(--font-title)', fontSize: 9, color: 'var(--green-dim)',
+          letterSpacing: 2, padding: '7px 10px 5px',
+          borderBottom: '1px solid var(--border)', background: '#060606', flexShrink: 0,
+        }}>
+          <span style={{ color: 'var(--green)' }}>[ </span>PAYLOAD ({findings.length})<span style={{ color: 'var(--green)' }}> ]</span>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {loading && <div style={{ padding: 16, fontSize: 9, color: 'var(--green-dark)', textAlign: 'center', letterSpacing: 1 }}>CHARGEMENT…</div>}
+          {!loading && findings.length === 0 && (
+            <div style={{ padding: 16, fontSize: 9, color: '#445566', textAlign: 'center', letterSpacing: 1 }}>
+              Aucun finding confirmé — lancez un scan.
+            </div>
+          )}
+          {SEV_ORDER.map(sev => {
+            const group = bySeverity[sev]
+            if (!group || group.length === 0) return null
+            const col = SEV_COLORS[sev]
+            return (
+              <div key={sev}>
+                <div style={{ padding: '4px 10px', fontSize: 8, color: col, letterSpacing: 2, background: '#010e08', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-title)' }}>
+                  {sev} ({group.length})
+                </div>
+                {group.map(f => {
+                  const isSelected = selected?.id === f.id
+                  const ep = f.affected_endpoints[0] ?? '—'
+                  const shortEp = ep.length > 22 ? '…' + ep.slice(-20) : ep
+                  return (
+                    <div key={f.id} onClick={() => setSelected(f)} style={{
+                      padding: '6px 10px', cursor: 'pointer',
+                      background: isSelected ? '#031a0e' : 'transparent',
+                      borderLeft: `2px solid ${isSelected ? col : 'transparent'}`,
+                      borderBottom: '1px solid var(--border)', transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#0a1a12' }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 8, color: col, fontFamily: 'var(--font-title)', letterSpacing: 0.5 }}>{f.cwe_id}</span>
+                        {!f.has_replay && <span style={{ fontSize: 7, color: '#445566' }}>▪ statique</span>}
+                      </div>
+                      <div style={{ fontSize: 9, color: '#445566', marginTop: 2, fontFamily: 'var(--font-mono)' }}>{shortEp}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <div style={{ flex: 1, overflow: 'hidden', background: '#010e08' }}>
+        {selected ? (
+          <Detail key={selected.id} finding={selected} />
+        ) : (
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2a4a2a', fontSize: 10, letterSpacing: 2 }}>
+            ← SÉLECTIONNER UN FINDING
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

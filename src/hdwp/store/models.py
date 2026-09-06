@@ -77,6 +77,18 @@ class FindingRecord(SQLModel, table=True):
     created_at: str = Field(default_factory=_now_iso)
 
 
+class ChainFindingRecord(SQLModel, table=True):
+    __tablename__ = "chain_findings"
+    id: str = Field(primary_key=True)
+    session_id: str
+    chain_type: str
+    trigger_finding_ids: str   # JSON list
+    severity: str
+    confidence: float
+    data_json: str             # ChainFinding.proof + step metadata
+    created_at: str = Field(default_factory=_now_iso)
+
+
 class ModelSnapshotRecord(SQLModel, table=True):
     __tablename__ = "model_snapshots"
     id: str = Field(primary_key=True)

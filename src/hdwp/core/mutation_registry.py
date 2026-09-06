@@ -291,6 +291,36 @@ def _register_builtins() -> None:
             "cwe_id": "CWE-613",
             "remediation": "Invalider les tokens cote serveur au logout.",
         },
+        {
+            "name": "path_traversal",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-22",
+            "remediation": "Valider et normaliser les chemins de fichiers. Rejeter tout '..' dans les paramètres.",
+        },
+        {
+            "name": "nosqli",
+            "owasp_category": "A03:2021",
+            "cwe_id": "CWE-943",
+            "remediation": "Valider les types des paramètres. Rejeter les objets JS là où une chaîne est attendue.",
+        },
+        {
+            "name": "open_redirect",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-601",
+            "remediation": "Valider les URLs de redirection contre une liste blanche de domaines autorisés.",
+        },
+        {
+            "name": "method_override",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-284",
+            "remediation": "Désactiver le support des headers X-HTTP-Method-Override ou les valider côté serveur.",
+        },
+        {
+            "name": "http_method_fuzzing",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-284",
+            "remediation": "Appliquer des contrôles d'autorisation cohérents pour chaque méthode HTTP acceptée.",
+        },
     ]
     for meta in _metadata:
         try:
@@ -302,8 +332,10 @@ def _register_builtins() -> None:
     try:
         from hdwp.core.experiment.mutation_module import (
             apply_field_injection,
+            apply_http_method_fuzzing,
             apply_identity_swap,
             apply_jwt_manipulation,
+            apply_method_override,
             apply_object_ref_change,
             apply_origin_test,
             apply_privilege_escalation,
@@ -312,8 +344,10 @@ def _register_builtins() -> None:
         )
         from hdwp.core.experiment.request_selector import (
             plan_field_injection,
+            plan_http_method_fuzzing,
             plan_identity_swap,
             plan_jwt_manipulation,
+            plan_method_override,
             plan_object_ref_change,
             plan_origin_test,
             plan_privilege_escalation,
@@ -330,6 +364,11 @@ def _register_builtins() -> None:
             ("origin_test",          plan_origin_test,          apply_origin_test),
             ("race_condition",       plan_race_condition,       apply_race_condition),
             ("token_reuse",          plan_token_reuse,          apply_token_reuse),
+            ("method_override",      plan_method_override,      apply_method_override),
+            ("path_traversal",       plan_field_injection,      apply_field_injection),
+            ("nosqli",               plan_field_injection,      apply_field_injection),
+            ("open_redirect",        plan_field_injection,      apply_field_injection),
+            ("http_method_fuzzing",  plan_http_method_fuzzing,  apply_http_method_fuzzing),
         ]
         for mut_name, plan_fn, apply_fn in _plan_apply:
             entry = _MUTATIONS.get(mut_name)

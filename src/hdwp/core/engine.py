@@ -99,6 +99,8 @@ class HDWPEngine:
         repository: Repository,
         report_engine: ReportEngine,
         knowledge_base: KnowledgeBase | None = None,
+        prop_engine: SecurityPropertyEngine | None = None,
+        llm_layer: Any | None = None,
     ) -> None:
         self._context = context
         self._bus = bus
@@ -111,6 +113,18 @@ class HDWPEngine:
         self._repository = repository
         self._report_engine = report_engine
         self._kb = knowledge_base
+        self._prop_engine = prop_engine
+        self._llm_layer = llm_layer
+
+        from hdwp.core.chain.engine import ChainEngine
+        self._chain_engine = ChainEngine(
+            bus=bus,
+            model_accessor=app_model.snapshot,
+            flow_map_accessor=app_model.get_flow_map,
+            repository=repository,
+            target_url=context.base_url,
+            session_id=context.session_id,
+        )
 
     @property
     def report_engine(self) -> ReportEngine:
@@ -139,9 +153,18 @@ class HDWPEngine:
         # Plugin registry
         registry = PluginRegistry()
         registry.discover()
-        enabled = plugin_ids or context.config.plugins.enabled
-        for pid in enabled:
-            registry.enable(pid)
+        disabled_ids = set(context.config.plugins.disabled)
+        if plugin_ids:
+            for pid in plugin_ids:
+                registry.enable(pid)
+        elif context.config.plugins.enabled:
+            for pid in context.config.plugins.enabled:
+                registry.enable(pid)
+        else:
+            # enabled=[] → activer tous les plugins découverts sauf ceux explicitement désactivés
+            for p in registry.list_all():
+                if p.id not in disabled_ids:
+                    registry.enable(p.id)
 
         # Enregistrer les mutations custom des plugins
         from hdwp.core import mutation_registry
@@ -193,7 +216,7 @@ class HDWPEngine:
         from hdwp.core.property_engine.inference_registry import InferenceRegistry
 
         inference_reg = InferenceRegistry.default_with_kb_stats(kb_stats)
-        SecurityPropertyEngine(bus, plugin_registry=registry, inference_registry=inference_reg)
+        prop_engine = SecurityPropertyEngine(bus, plugin_registry=registry, inference_registry=inference_reg)
         hyp_engine = HypothesisEngine(
             bus,
             model_accessor=app_model.snapshot,
@@ -213,8 +236,14 @@ class HDWPEngine:
 
         obs_engine = ObservationEngine(bus, context, scope_guard, llm_layer=llm_layer, proxy_url=proxy_url)
 
+        # Configurer le proxy global pour tous les clients HTTP créés via http_client.build_client()
+        # proxy_url (CLI --proxy) prime sur tor_proxy (config file)
+        from hdwp.core import http_client as _http_client
+        effective_proxy = proxy_url or context.config.options.tor_proxy
+        _http_client.configure(effective_proxy)
+
         rate_limiter = TokenBucket.from_rpm(context.config.options.max_requests_per_minute)
-        session_manager = SessionManager(context.config.roles)
+        session_manager = SessionManager(context.config.roles, proxy_url=effective_proxy)
 
         # Initialize clients via session manager context manager
         async with session_manager as sm:
@@ -259,6 +288,8 @@ class HDWPEngine:
             repository=repository,
             report_engine=report_engine,
             knowledge_base=kb,
+            prop_engine=prop_engine,
+            llm_layer=llm_layer,
         )
 
     @classmethod
@@ -304,22 +335,6 @@ class HDWPEngine:
         await self._obs_engine.start()
         await self._bus.drain()
 
-        # Phase 1b-bis : scan des versions de bibliothèques JS/CSS (OWASP A06:2021)
-        try:
-            from hdwp.core.observation.version_scanner import scan_and_emit as _vs_scan
-            vs_count = await _vs_scan(
-                script_urls=self._obs_engine.collected_script_urls,
-                script_contents=self._obs_engine.collected_script_contents,
-                script_pages=self._obs_engine.collected_script_pages,
-                bus=self._bus,
-                repository=self._repository,
-            )
-            if vs_count > 0:
-                log.info("engine.version_scan_done", findings=vs_count)
-                await self._bus.drain()
-        except Exception as exc:
-            log.warning("engine.version_scan_failed", error=str(exc))
-
         # Phase 1c : auto-registration si moins de 2 roles authentifies
         if self._context.config.options.allow_write:
             auth_roles = [
@@ -339,6 +354,8 @@ class HDWPEngine:
                 for role in new_roles:
                     await self._session_manager.add_role(role)
                     log.info("engine.auto_registered_role", role=role.name)
+                if new_roles:
+                    await self._bus.drain()
                 self._auto_registrar: AutoRegistrar | None = registrar
             else:
                 self._auto_registrar = None
@@ -359,15 +376,43 @@ class HDWPEngine:
                 msg="Le modele a peu de couverture -- les hypotheses peuvent etre limitees",
             )
 
-        # Phase 2 : expériences en PARALLÈLE (corpus complet disponible après le crawl)
-        # run_pending() utilise un sémaphore pour limiter la concurrence (défaut : 3).
-        # C'est plus rapide que séquentiel car les hypothèses tournent simultanément,
-        # tout en garantissant un corpus complet pour que RequestSelector trouve des plans.
-        pending = self._hyp_engine.get_pending()
-        log.info("engine.hypotheses_ready", count=len(pending))
+        # Phase 2 vague 1 : experiments sur les hypothèses générées pendant le crawl.
+        # Le corpus est complet (crawl terminé), pas de risque de concurrence.
+        pending_v1 = self._hyp_engine.get_pending()
+        log.info("engine.experiments_v1", count=len(pending_v1))
 
-        if pending:
-            await self._exp_engine.run_pending(pending)
+        if pending_v1:
+            await self._exp_engine.run_pending(pending_v1)
+            await self._bus.drain()
+
+        # Phase 1b-bis : scan des versions de bibliothèques JS/CSS (OWASP A06:2021)
+        try:
+            from hdwp.core.observation.version_scanner import scan_and_emit as _vs_scan
+            vs_count = await _vs_scan(
+                script_urls=self._obs_engine.collected_script_urls,
+                script_contents=self._obs_engine.collected_script_contents,
+                script_pages=self._obs_engine.collected_script_pages,
+                bus=self._bus,
+                repository=self._repository,
+            )
+            if vs_count > 0:
+                log.info("engine.version_scan_done", findings=vs_count)
+                await self._bus.drain()
+        except Exception as exc:
+            log.warning("engine.version_scan_failed", error=str(exc))
+
+        # Phase 2 vague 2 : nouvelles hypothèses générées par le version scan ou l'auto-registration.
+        pending_v2 = self._hyp_engine.get_pending()
+        log.info("engine.experiments_v2", count=len(pending_v2))
+
+        if pending_v2:
+            await self._exp_engine.run_pending(pending_v2)
+            await self._bus.drain()
+
+        # Phase 3 : chaînes d'attaque (si 2+ findings confirmés)
+        if self._chain_engine.has_pending_chains():
+            log.info("engine.chains_start")
+            await self._chain_engine.run_pending_chains(self._exp_engine)
             await self._bus.drain()
 
         # Recuperer les findings confirmes

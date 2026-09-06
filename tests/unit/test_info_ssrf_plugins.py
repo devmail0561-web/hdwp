@@ -63,10 +63,10 @@ def test_info_disclosure_infer_properties_with_endpoints() -> None:
     assert len(props) == 1
 
 
-def test_info_disclosure_max_3_hypotheses() -> None:
+def test_info_disclosure_max_hypotheses() -> None:
     eps = [EndpointNode(path=f"/api/ep{i}", methods=["GET"]) for i in range(10)]
     hyps = InfoDisclosurePlugin().generate_hypotheses(_make_model(endpoints=eps))
-    assert len(hyps) <= 3
+    assert len(hyps) <= 15  # max 3 payloads × 5 endpoints
 
 
 # ── SSRFPlugin ────────────────────────────────────────────────────────────────

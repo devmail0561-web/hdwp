@@ -12,6 +12,7 @@ from sqlmodel import select
 
 from hdwp.store.credential_filter import filter_credentials
 from hdwp.store.models import (
+    ChainFindingRecord,
     DiffRecord,
     ExperimentRecord,
     FindingRecord,
@@ -216,6 +217,48 @@ class Repository:
             if record is None:
                 return None
             return ExperimentResult.model_validate_json(record.data_json)
+
+    # ── chain findings ────────────────────────────────────────
+
+    async def save_chain_finding(
+        self,
+        chain_id: str,
+        session_id: str,
+        chain_type: str,
+        trigger_finding_ids: list[str],
+        severity: str,
+        confidence: float,
+        proof: dict,
+    ) -> None:
+        record = ChainFindingRecord(
+            id=chain_id,
+            session_id=session_id,
+            chain_type=chain_type,
+            trigger_finding_ids=json.dumps(trigger_finding_ids),
+            severity=severity,
+            confidence=confidence,
+            data_json=json.dumps(proof),
+        )
+        async with await self._session() as session:
+            session.add(record)
+            await session.commit()
+
+    async def list_chain_findings(self, session_id: str | None = None) -> list[dict]:
+        async with await self._session() as session:
+            stmt = select(ChainFindingRecord)
+            if session_id:
+                stmt = stmt.where(ChainFindingRecord.session_id == session_id)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [
+                {
+                    "id": r.id, "chain_type": r.chain_type,
+                    "trigger_finding_ids": json.loads(r.trigger_finding_ids),
+                    "severity": r.severity, "confidence": r.confidence,
+                    "proof": json.loads(r.data_json),
+                }
+                for r in rows
+            ]
 
     # ── model snapshots ───────────────────────────────────────
 

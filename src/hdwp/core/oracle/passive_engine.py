@@ -82,14 +82,20 @@ _STACK_RE = [re.compile(p) for p in STACK_TRACE_PATTERNS]
 
 
 def _passive_score() -> ConfidenceScore:
-    """Observation directe : score de confiance fixe élevé."""
+    """Observation directe : score de confiance élevé mais reproductibilité honnête.
+
+    Les findings passifs (headers manquants, cookies mal configurés) sont
+    observationnels — pas de replay actif. La reproductibilité est réelle
+    (la config est stable) mais pas vérifiée par un second test HTTP distinct.
+    overall = 0.25*1.0 + 0.30*0.65 + 0.15*0.8 + 0.15*1.0 + 0.15*0.5 = 0.77
+    """
     return ConfidenceScore(
         oracle_strength=1.0,
-        reproducibility=1.0,
+        reproducibility=0.65,    # config stable mais non re-testée
         observation_quality=0.8,
         behavioral_specificity=1.0,
-        experiment_coverage=1.0,
-        overall=0.96,
+        experiment_coverage=0.5, # une seule observation, pas de replay
+        overall=0.77,
     )
 
 

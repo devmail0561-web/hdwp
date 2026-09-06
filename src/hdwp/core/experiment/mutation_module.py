@@ -100,9 +100,17 @@ def apply_field_injection(plan: ConcreteExperimentPlan, sm: SessionManager) -> N
         case "body" if isinstance(req.body, dict):
             new_body = {**req.body, param: payload}
             return req.model_copy(update={"body": new_body})
+        case "body" if isinstance(req.body, str):
+            # Raw string body (form-encoded, XML, plain text) — append payload
+            return req.model_copy(update={"body": req.body + payload})
         case "path":
             new_url = _replace_first_id_in_path(req.url, payload)
             return req.model_copy(update={"url": new_url})
+        case "header":
+            # Injection into HTTP request headers (custom header injection)
+            header_name = param or "X-Injected"
+            new_headers = {**dict(req.headers or {}), header_name: payload}
+            return req.model_copy(update={"headers": new_headers})
         case _:
             return req
 
@@ -141,6 +149,20 @@ def apply_origin_test(plan: ConcreteExperimentPlan, sm: SessionManager) -> Norma
     return plan.baseline_request.model_copy(update={"headers": new_headers})
 
 
+def apply_method_override(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
+    """Ajoute X-HTTP-Method-Override header pour contourner le contrôle de méthode."""
+    override_method = plan.mutation_params.get("override_method", "DELETE")
+    new_headers = {
+        **plan.baseline_request.headers,
+        "X-HTTP-Method-Override": override_method,
+        "X-HTTP-Method": override_method,
+        "X-Method-Override": override_method,
+    }
+    return plan.baseline_request.model_copy(
+        update={"method": "GET", "headers": new_headers}
+    )
+
+
 def apply_race_condition(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
     """Return baseline request unmodified — concurrency handled by TemporalModule."""
     return plan.baseline_request
@@ -149,6 +171,19 @@ def apply_race_condition(plan: ConcreteExperimentPlan, sm: SessionManager) -> No
 def apply_token_reuse(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
     """Return baseline request unmodified — replay logic handled by TemporalModule."""
     return plan.baseline_request
+
+
+def apply_http_method_fuzzing(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
+    """Change la méthode HTTP de la requête baseline."""
+    new_method = plan.mutated_value or "POST"
+    req = plan.baseline_request
+    new_headers = dict(req.headers or {})
+    if new_method in ("POST", "PUT", "PATCH") and "content-type" not in {k.lower() for k in new_headers}:
+        new_headers["Content-Type"] = "application/json"
+    body = req.body
+    if new_method in ("POST", "PUT", "PATCH") and body is None:
+        body = {}
+    return req.model_copy(update={"method": new_method, "headers": new_headers, "body": body})
 
 
 class MutationModule:

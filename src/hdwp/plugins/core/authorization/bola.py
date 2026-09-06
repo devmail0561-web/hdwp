@@ -59,14 +59,22 @@ class BOLAPlugin(HDWPPlugin):
 
     def generate_hypotheses(self, model: ApplicationModelData) -> list[Hypothesis]:
         hypotheses: list[Hypothesis] = []
-        for param in model.parameters:
-            if param.affects_object and param.type_inferred in ("integer", "uuid"):
+        for ep in model.endpoints:
+            # Filtrer les endpoints publics — BOLA non pertinent sans contrôle d'accès
+            if not ep.auth_required and not ep.roles_observed:
+                continue
+            for param in model.parameters:
+                if param.id not in ep.parameters:
+                    continue
+                # Signal sémantique : affects_object = lien direct vers un DataObjectNode = BOLA
+                if not param.affects_object:
+                    continue
                 hypotheses.append(
                     Hypothesis(
                         source_plugin=self.id,
                         property_id="",
                         statement=(
-                            f"Object accessed via parameter '{param.name}' lacks ownership "
+                            f"[{ep.path}] Object accessed via '{param.name}' lacks ownership "
                             "verification — changing the ID returns another user's data"
                         ),
                         priority="HIGH",
@@ -74,14 +82,15 @@ class BOLAPlugin(HDWPPlugin):
                         required_experiments=[
                             ExperimentSpec(
                                 mutation_type="object_ref_change",
-                                base_request=NormalizedRequest(method="GET", url=""),
+                                base_request=NormalizedRequest(method=ep.methods[0] if ep.methods else "GET", url=""),
                                 mutation_params={
                                     "parameter_name": param.name,
                                     "parameter_location": param.location,
+                                    "endpoint_path": ep.path,
                                 },
-                                description=f"Change '{param.name}' to another user's object ID",
+                                description=f"Change '{param.name}' to another user's object ID on {ep.path}",
                             ),
                         ],
                     )
                 )
-        return hypotheses
+        return hypotheses[:10]

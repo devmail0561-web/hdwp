@@ -7,7 +7,11 @@ import type { EndpointNode, Finding, FlowMap } from '../types/hdwp'
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const { addEvent, setProxyActive, setIdsDetected, setWsConnected, setEndpoints } = useScanStore()
+  const {
+    addEvent, setProxyActive, setIdsDetected, setWsConnected, setEndpoints,
+    setStatus, setPhase, setErrorMessage,
+    incrementHypothesisCount, incrementPropertyCount, incrementExperimentCount,
+  } = useScanStore()
   const { addFinding } = useFindingsStore()
   const { setFlowMap } = useFlowStore()
 
@@ -25,11 +29,13 @@ export function useWebSocket() {
     ws.onmessage = ({ data }) => {
       try {
         const event = JSON.parse(data as string)
+        // Ignorer les événements qui appartiennent à une autre session active
+        const currentSessionId = useScanStore.getState().sessionId
+        if (event.session_id && currentSessionId && event.session_id !== currentSessionId) return
         addEvent(event)
-        if (event.type === 'proxy.started') setProxyActive(true)
-        if (event.type === 'proxy.failed') setProxyActive(false)
         if (event.type === 'observation.raw') {
-          const sc = (event.payload as Record<string, unknown>)?.status_code
+          const resp = (event.payload as Record<string, unknown>)?.response as Record<string, unknown> | undefined
+          const sc = resp?.status_code
           if (sc === 429 || sc === 503) setIdsDetected(true)
         }
         if (event.type === 'model.updated') {
@@ -46,6 +52,19 @@ export function useWebSocket() {
           const p = event.payload as Record<string, string>
           useScanStore.getState().setAuthRequiredUrl(p.path_pattern || p.url || '')
         }
+        if (event.type === 'hypothesis.generated') incrementHypothesisCount()
+        if (event.type === 'property.inferred') incrementPropertyCount()
+        if (event.type === 'experiment.result') incrementExperimentCount()
+        if (event.type === 'scan.completed') {
+          setStatus('done')
+          setPhase('DONE')
+        }
+        if (event.type === 'scan.error') {
+          setStatus('error')
+          setPhase('ERROR')
+          const errMsg = (event.payload as Record<string, unknown>)?.error
+          if (typeof errMsg === 'string') setErrorMessage(errMsg)
+        }
       } catch {
         // ignore malformed
       }
@@ -57,7 +76,11 @@ export function useWebSocket() {
     }
 
     ws.onerror = () => ws.close()
-  }, [addEvent, addFinding, setProxyActive, setIdsDetected, setWsConnected, setEndpoints])
+  }, [
+    addEvent, addFinding, setProxyActive, setIdsDetected, setWsConnected, setEndpoints,
+    setFlowMap, setStatus, setPhase, setErrorMessage,
+    incrementHypothesisCount, incrementPropertyCount, incrementExperimentCount,
+  ])
 
   useEffect(() => {
     connect()

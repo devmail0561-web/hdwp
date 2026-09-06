@@ -69,11 +69,14 @@ class OptionsConfig(BaseModel):
     max_concurrent_experiments: int = 3  # expériences en parallèle dans le pipeline réactif
     language: str = "en"
     knowledge_db: str | None = None  # None → ~/.hdwp/knowledge.db
+    # Proxy sortant — socks5h://127.0.0.1:9150 = Tor Browser par défaut.
+    # Mettre à null pour connexion directe, ou une URL HTTP(S) pour un proxy MITM type Burp.
+    tor_proxy: str | None = "socks5h://127.0.0.1:9150"
 
 
 class PluginConfig(BaseModel):
-    enabled: list[str] = []
-    disabled: list[str] = []
+    enabled: list[str] = []   # vide = tous les plugins découverts actifs
+    disabled: list[str] = []  # liste noire explicite (IDs à exclure)
     config: dict[str, dict[str, Any]] = {}
 
 

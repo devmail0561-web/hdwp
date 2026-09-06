@@ -23,8 +23,14 @@ from hdwp.plugins.base import HDWPPlugin
 # Mots-clés pour identifier les endpoints de logout
 LOGOUT_KEYWORDS = frozenset({
     "logout", "signout", "disconnect", "destroy", "invalidate",
-    "deauth", "close", "exit",
+    "deauth", "close", "exit", "revoke", "expire", "terminate",
 })
+
+# Patterns de paths OAuth/token revocation
+LOGOUT_PATH_PATTERNS = (
+    "/api/auth/", "/oauth/revoke", "/token/revoke", "/auth/revoke",
+    "/session/end", "/session/destroy", "/connect/logout",
+)
 
 
 class SessionReplayPlugin(HDWPPlugin):
@@ -64,10 +70,11 @@ class SessionReplayPlugin(HDWPPlugin):
             if ep.auth_required or ep.roles_observed
         ]
 
-        # Chercher endpoints de logout
+        # Chercher endpoints de logout (mots-clés ET patterns de path OAuth)
         logout_endpoints = [
             ep for ep in model.endpoints
             if any(kw in ep.path.lower() for kw in LOGOUT_KEYWORDS)
+            or any(pattern in ep.path.lower() for pattern in LOGOUT_PATH_PATTERNS)
         ]
 
         if auth_endpoints and logout_endpoints:
@@ -98,10 +105,11 @@ class SessionReplayPlugin(HDWPPlugin):
             if ep.auth_required or ep.roles_observed
         ][:3]  # Limiter à 3
 
-        # Chercher endpoints de logout
+        # Chercher endpoints de logout (mots-clés ET patterns de path OAuth)
         logout_endpoints = [
             ep for ep in model.endpoints
             if any(kw in ep.path.lower() for kw in LOGOUT_KEYWORDS)
+            or any(pattern in ep.path.lower() for pattern in LOGOUT_PATH_PATTERNS)
         ]
 
         if not auth_endpoints or not logout_endpoints:

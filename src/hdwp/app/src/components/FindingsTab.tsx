@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useFindingsStore } from '../stores/findingsStore'
+import { useScanStore } from '../stores/scanStore'
 import type { Finding } from '../types/hdwp'
 
 const SEV_COLORS: Record<string, string> = {
@@ -146,6 +147,12 @@ export function FindingsTab() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => { fetchFindings() }, [fetchFindings])
+
+  // Re-fetch when scan completes or errors (findings accumulate during the scan)
+  const { status } = useScanStore()
+  useEffect(() => {
+    if (status === 'done' || status === 'error') fetchFindings()
+  }, [status, fetchFindings])
 
   const selected = findings.find(f => f.id === selectedId) ?? null
 

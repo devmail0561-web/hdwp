@@ -88,8 +88,10 @@ def test_field_injection_does_not_mutate_original() -> None:
     assert plan.baseline_request.url == original_url
 
 
-def test_field_injection_unknown_location_returns_unchanged() -> None:
-    plan = _make_plan("header", "payload")
+def test_field_injection_header_location_injects() -> None:
+    # "header" is now a supported location — injects payload into request headers
+    plan = _make_plan("header", "injected-value")
     sm = SessionManager([RoleConfig(name="anonymous")])
     mutated = MutationModule().apply(plan, sm)
-    assert mutated == plan.baseline_request
+    # The mutated request should have the header injected (param name from plan)
+    assert mutated != plan.baseline_request or "X-Injected" in (mutated.headers or {})

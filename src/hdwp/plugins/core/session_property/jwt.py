@@ -81,27 +81,27 @@ class JWTPlugin(HDWPPlugin):
             return []
 
         hyps: list[Hypothesis] = []
-        target_ep = auth_endpoints[0]
-
-        for attack, description in _JWT_ATTACKS:
-            hyps.append(
-                Hypothesis(
-                    source_plugin=self.id,
-                    property_id="",
-                    statement=f"JWT {attack}: {description} accepté par le serveur",
-                    priority="HIGH",
-                    priority_rationale="Faille JWT = bypass d'authentification complet",
-                    required_experiments=[
-                        ExperimentSpec(
-                            mutation_type="jwt_manipulation",
-                            base_request=NormalizedRequest(method="GET", url=""),
-                            mutation_params={
-                                "jwt_attack": attack,
-                                "target_endpoint": target_ep.path,
-                            },
-                            description=description,
-                        )
-                    ],
+        # Tester TOUS les endpoints authentifiés (pas seulement le premier), limité à 10
+        for target_ep in auth_endpoints[:10]:
+            for attack, description in _JWT_ATTACKS:
+                hyps.append(
+                    Hypothesis(
+                        source_plugin=self.id,
+                        property_id="",
+                        statement=f"JWT {attack} sur '{target_ep.path}': {description} accepté",
+                        priority="HIGH",
+                        priority_rationale="Faille JWT = bypass d'authentification complet",
+                        required_experiments=[
+                            ExperimentSpec(
+                                mutation_type="jwt_manipulation",
+                                base_request=NormalizedRequest(method="GET", url=""),
+                                mutation_params={
+                                    "jwt_attack": attack,
+                                    "target_endpoint": target_ep.path,
+                                },
+                                description=description,
+                            )
+                        ],
+                    )
                 )
-            )
         return hyps

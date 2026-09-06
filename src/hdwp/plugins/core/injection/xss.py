@@ -28,11 +28,14 @@ XSS_PARAM_KEYWORDS = frozenset({
 
 # Payloads XSS classiques
 XSS_PAYLOADS = [
-    "<script>alert(1)</script>",
-    "<img src=x onerror=alert(1)>",
-    "<svg onload=alert(1)>",
-    "javascript:alert(1)",
-    "'><script>alert(String.fromCharCode(88,83,83))</script>",
+    "<script>alert(1)</script>",                             # direct reflection
+    "<img src=x onerror=alert(1)>",                         # inline event handler
+    "<svg onload=alert(1)>",                                 # SVG vector
+    '"><script>alert(1)</script>',                           # break out of attribute
+    "' onmouseover='alert(1)",                               # attribute injection
+    "<script>alert(String.fromCharCode(88,83,83))</script>", # encoded char bypass
+    "%3Cscript%3Ealert(1)%3C%2Fscript%3E",                  # URL-encoded
+    "<iframe src=\"javascript:alert(1)\">",                  # iframe js protocol
 ]
 
 
@@ -94,14 +97,29 @@ class XSSPlugin(HDWPPlugin):
         """Génère des hypothèses XSS pour les paramètres candidats."""
         hypotheses: list[Hypothesis] = []
 
-        # Paramètres candidats
+        # Paramètres candidats avec filtrage sémantique + contexte endpoint
+        # XSS pertinent seulement si la réponse est HTML ou sans content-type connu
+        EXCLUDED_SEMANTICS = frozenset({"id_ref", "file_path", "url_redirect", "credential"})
         candidates = [
             p for p in model.parameters
-            if any(kw in p.name.lower() for kw in XSS_PARAM_KEYWORDS)
-            and p.type_inferred == "string"
+            if p.type_inferred == "string"
+            and getattr(p, 'semantic', None) not in EXCLUDED_SEMANTICS
+            and p.affects_object is None
+            and (
+                getattr(p, 'semantic', None) is None
+                or any(kw in p.name.lower() for kw in XSS_PARAM_KEYWORDS)
+            )
         ][:5]
 
         for param in candidates:
+            # Trouver l'endpoint et vérifier si la réponse est HTML-compatible
+            endpoints = [ep for ep in model.endpoints if param.id in ep.parameters]
+            ep_path = endpoints[0].path if endpoints else ""
+            content_type = getattr(endpoints[0], 'response_content_type', None) if endpoints else None
+            # Skip si content-type est JSON pur (XSS peu pertinent)
+            if content_type and "json" in content_type.lower() and "html" not in content_type.lower():
+                continue
+
             experiments: list[ExperimentSpec] = []
             for payload in XSS_PAYLOADS[:3]:
                 experiments.append(
@@ -113,6 +131,7 @@ class XSSPlugin(HDWPPlugin):
                             "parameter_location": param.location,
                             "payload": payload,
                             "payload_type": "xss",
+                            "endpoint_path": ep_path,
                         },
                         description=f"XSS test: {param.name}={payload[:30]}",
                     )
@@ -123,7 +142,7 @@ class XSSPlugin(HDWPPlugin):
                     source_plugin=self.id,
                     property_id="",
                     statement=(
-                        f"Le paramètre '{param.name}' est vulnérable à XSS (payload reflété non-encodé)"
+                        f"[{ep_path}] Le paramètre '{param.name}' est vulnérable à XSS (payload reflété non-encodé)"
                     ),
                     priority="HIGH",
                     priority_rationale="XSS permet vol de sessions et exécution de code côté client",

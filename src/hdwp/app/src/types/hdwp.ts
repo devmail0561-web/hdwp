@@ -18,10 +18,30 @@ export interface Finding {
   remediation_hint: string
 }
 
-export interface ExploitFinding extends Finding {
+export interface PayloadFinding extends Finding {
   has_replay: boolean
   replay_type: 'passive' | 'experiment' | 'none'
   proof: Record<string, unknown>
+}
+
+export interface ExploitRelatedFinding {
+  id: string
+  cwe_id: string
+  severity: string
+  endpoint: string
+}
+
+export interface ExploitResult {
+  finding_id: string
+  vuln_type: string
+  status: 'success' | 'partial' | 'not_implemented' | 'failed'
+  impact_evidence: Record<string, unknown> | null
+  request_used: Record<string, unknown> | null
+  elapsed_ms: number
+  note: string
+  impact_description?: string
+  attack_scenarios?: string[]
+  related_findings?: ExploitRelatedFinding[]
 }
 
 export interface StateResponse {
@@ -33,6 +53,8 @@ export interface StateResponse {
   endpoint_count: number
   hypothesis_count: number
   findings_count: number
+  property_count: number
+  experiment_count: number
   proxy_active: boolean
   error_message: string
 }
@@ -127,4 +149,47 @@ export interface ManualToken {
   role_name: string
   token_type: 'bearer' | 'basic' | 'api_key' | 'cookie'
   token_value: string
+}
+
+export interface ChainCandidate {
+  chain_type: string
+  description: string
+  precondition_finding_ids: string[]
+  executable: boolean
+  missing_preconditions: string[]
+}
+
+export interface ChainFinding {
+  id: string
+  chain_type: string
+  trigger_finding_ids: string[]
+  severity: string
+  confidence: number
+  proof: Record<string, unknown>
+}
+
+export interface ScriptTemplate {
+  name: string
+  path: string
+  type: 'py' | 'sh' | 'js'
+  description: string
+}
+
+export interface ScriptResult {
+  success: boolean
+  stdout: string
+  stderr: string
+  exit_code: number
+  elapsed_ms: number
+}
+
+export interface ExploitAction {
+  finding_id: string
+  action_type: 'demo_page' | 'payload_url' | 'html_form' | 'click_link' | 'copy_payload'
+  title: string
+  description: string
+  payload: string
+  demo_url: string | null
+  instructions: string[]
+  copy_ready: boolean
 }

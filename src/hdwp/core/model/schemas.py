@@ -62,6 +62,9 @@ class EndpointNode(BaseModel):
     roles_observed: list[str] = Field(default_factory=list)
     parameters: list[str] = Field(default_factory=list)
     returns: list[str] = Field(default_factory=list)
+    response_content_type: str | None = None  # MIME type de la réponse observée
+    accepts_xml: bool = False                  # Endpoint accepte/retourne XML
+    is_graphql: bool = False                   # Endpoint GraphQL détecté
 
 
 class ParameterNode(BaseModel):
@@ -71,6 +74,7 @@ class ParameterNode(BaseModel):
     type_inferred: Literal["integer", "string", "uuid", "boolean", "object", "array"] = "string"
     affects_object: str | None = None
     is_user_controlled: bool = True
+    semantic: str | None = None  # "file_path"|"url_redirect"|"xml_input"|"template_expr"|"id_ref"|"credential"
 
 
 class DataObjectNode(BaseModel):
@@ -117,6 +121,8 @@ class ApplicationModelData(BaseModel):
     relations: list[dict[str, Any]] = Field(default_factory=list)
     last_updated: str = ""
     fsm: ApplicationFSM | None = None
+    tech_stack: list[str] = Field(default_factory=list)             # ["server:Apache/2.4", "framework:Django"]
+    detected_content_types: list[str] = Field(default_factory=list) # ["application/json", "application/xml"]
 
 
 class PropertyType(str, Enum):
@@ -208,6 +214,7 @@ class SemanticDiff(BaseModel):
     leaked_fields: list[str] = Field(default_factory=list)
     status_difference: bool = False
     body_similarity: float = 0.0
+    data_identity_score: float | None = None  # 1.0=same user data, 0.0=different data, None=undetermined
     verdict: DiffVerdict = DiffVerdict.INSIGNIFICANT
     verdict_rationale: str = ""
 
@@ -265,3 +272,23 @@ class DataFlowMap(BaseModel):
     db_tables: list[DBTable] = Field(default_factory=list)
     exfiltration_risks: list[str] = Field(default_factory=list)
     last_updated: str = ""
+
+
+# ── Chain Attack schemas ──────────────────────────────────────────────────────
+
+class ChainStep(BaseModel):
+    step_index: int
+    request: NormalizedRequest
+    role_name: str = "anonymous"
+    context_extractors: dict[str, str] = Field(default_factory=dict)
+    inject_context: dict[str, str] = Field(default_factory=dict)
+
+
+class ChainSpec(BaseModel):
+    id: str = Field(default_factory=lambda: generate_id("CHN"))
+    chain_type: str
+    steps: list[ChainStep]
+    precondition_finding_ids: list[str] = Field(default_factory=list)
+    description: str = ""
+    executable: bool = True
+    missing_preconditions: list[str] = Field(default_factory=list)

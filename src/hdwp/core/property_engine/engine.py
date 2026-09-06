@@ -57,6 +57,19 @@ class SecurityPropertyEngine:
 
         new_properties: list[SecurityProperty] = []
 
+        # Invalider les propriétés stales dont les model_nodes ne sont plus dans le modèle
+        current_node_ids = (
+            {ep.id for ep in model_data.endpoints}
+            | {p.id for p in model_data.parameters}
+            | {o.id for o in model_data.objects}
+        )
+        for prop in list(self._properties.values()):
+            if (prop.status == "active"
+                    and prop.model_nodes
+                    and not any(nid in current_node_ids for nid in prop.model_nodes)):
+                prop.status = "invalidated"
+                logger.debug("property.invalidated", prop_id=prop.id, type=prop.type.value)
+
         # Built-in + external inference modules from registry
         for module in self._inference_registry.list_active():
             try:

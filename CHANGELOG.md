@@ -6,6 +6,83 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
+## [2.0.0] — 2026-09-06 — Refonte majeure : moteur sémantique, couverture multi-méthodes, détection étendue
+
+### Moteur d'hypothèses — Retour aux principes sémantiques
+
+**Corrigés**
+- Plugins : utilisent maintenant `ParameterNode.semantic` (signal du modèle) au lieu du keyword matching sur les noms de paramètres
+- `BOLAPlugin` : filtre par `affects_object` + `auth_required` + inclut `endpoint_path` dans les plans
+- `SQLiPlugin` : exclut les sémantiques `id_ref`, `file_path`, `url_redirect` (cibles d'autres plugins)
+- `XSSPlugin` : filtre par `response_content_type` — évite les tests XSS sur des endpoints JSON purs
+- `SSRFPlugin` / `PathTraversalPlugin` : utilisent `semantic == "url_redirect"` / `"file_path"` en priorité
+
+### Inférence de propriétés — Surface complète
+
+**Ajoutés**
+- `IntegrityInference` : règle `_SEMANTIC_TO_PROPERTY` — génère des propriétés de sécurité depuis le champ `ParameterNode.semantic` (path_traversal, SSRF, SSTI, XXE, credential exposure)
+- `ConcurrencyInference` : TOCTOU detection sur endpoints POST/PUT avec paramètres business-critiques (price, amount, balance…)
+- `ApplicationModel._infer_sensitivity()` : élève automatiquement `DataObjectNode.sensitivity` à `"sensitive"` quand `schema_def` contient des champs PII (email, password, ssn…)
+- `ApplicationModel` : parse le header `Allow:` des réponses OPTIONS pour peupler `EndpointNode.methods`
+
+### Oracle — Réduction des faux positifs
+
+**Corrigés**
+- `assess_ssti` : détecte les config leaks Flask/Django (`SECRET_KEY`, `DEBUG`…) quand `expected_result` est vide
+- `assess_nosqli` : suppression du faux positif systématique `"token" in body.lower()`
+- `assess_identity_swap` : AMBIGUOUS quand `data_identity_score is None` sans diff comportemental
+- `assess_privilege_escalation` : AMBIGUOUS si les deux rôles retournent le même contenu identique (endpoint public)
+- `assess_sqli` : détection time-based blind via `experiment.timing_ms - baseline.timing_ms > 3000ms`
+- `_compute_data_identity` : recherche récursive (3 niveaux) — supporte GraphQL et REST avec envelope JSON
+- `PassiveFindingEngine` : `reproducibility = 0.65` (au lieu de 1.0 hardcodé), `overall = 0.77`
+- `HypothesisPrioritizer` : plancher `surface = max(surface, 0.25)` — grandes APIs ne sont plus pénalisées
+
+### Couverture multi-méthodes
+
+**Ajoutés**
+- `ActiveCrawler._probe_methods()` : sonde POST/PUT/PATCH sur chaque endpoint GET découvert → alimente le corpus avec des observations non-GET
+- `ActiveCrawler._probe_options()` : parse le header `Allow:` → alimente `EndpointNode.methods`
+- `JSExtractor.extract_endpoints()` : retourne `list[tuple[str, str]]` (url, method) — méthode HTTP préservée depuis fetch/axios/XHR
+- `RequestSelector` priorité 3 : génère des baselines synthétiques POST/PUT pour les endpoints connus du modèle mais absents du corpus
+- `ApplicationModel._store_in_corpus_by_url()` : méthode réelle de la requête source (au lieu de GET hardcodé)
+- `request_selector.plan_privilege_escalation` : `method = baseline.method if baseline.method else "GET"` (au lieu de `or "GET"` toujours atteint)
+
+### Détection étendue — 16 nouveaux plugins CWE
+
+**Ajoutés** : `xxe` (CWE-611), `graphql` (CWE-200/284), `crlf` (CWE-113), `deserialization` (CWE-502), `ldap_injection` (CWE-90), `xpath_injection` (CWE-643), `el_injection` (CWE-917), `prototype_pollution` (CWE-1321), `bfla` (CWE-285), `csrf` (CWE-352), `session_fixation` (CWE-384), `file_upload` (CWE-434), `security_headers` (CWE-693), `cache_poisoning` (CWE-345), `http_smuggling` (CWE-444), `http_parameter_pollution` (CWE-235)
+
+### Observation — Couverture HTML/JS/SPA
+
+**Ajoutés**
+- `_LinkExtractor` : support `<textarea>`, `<select>/<option>`, formulaires sans `action`
+- `HeaderInspector` : `Permissions-Policy`, `COOP`, `COEP`, `CORP`
+- `HDWPProxy` : injection snippet JS collecteur (console errors, window.onerror, sendBeacon) dans les réponses HTML
+- `SPACrawler` : crawl SPA via Playwright routé à travers le proxy MITM HDWP
+- `POST /__hdwp_console__` : route serveur recevant les erreurs JS capturées
+
+### Réseau — Tor par défaut
+
+**Ajoutés**
+- `http_client.py` : module central `build_client()` — toutes les requêtes sortantes passent par Tor (`socks5h://127.0.0.1:9150`) par défaut
+- `socksio>=1.0` : dépendance ajoutée pour SOCKS5 via httpx
+- Configuration via `options.tor_proxy` dans `hdwp-context.yaml`
+- Exploits : 2 tentatives (Tor d'abord, connexion directe en fallback si Tor bloque la cible)
+
+### Infrastructure
+
+**Corrigés** (bugs pré-existants)
+- `hdwp_proxy.py:422` : `asyncio.StreamWriter` sans argument `loop` (Python 3.12)
+- `hdwp_proxy.py:200` : `Transfer-Encoding: chunked` décodé correctement via `readexactly()`
+- `hdwp_proxy.py:376` : scope check AVANT le tunnel HTTPS CONNECT
+- `hdwp_proxy.py:183` : multiples `Set-Cookie` headers préservés
+- `version_scanner.py:157` : parsing CVSS v3 vecteurs corrigé
+- `experiment/engine.py:80` : ordonnancement HIGH-before-LOW préservé avec `asyncio.ensure_future`
+- `exploit.py:236` : `await sm.get_client()` → `sm.get_client()` (méthode synchrone)
+- `exploit.py:202` : `_extract_sensitive` limitée à 10 niveaux de récursion
+- `chain/engine.py:283` : `HDWPEvent` ne peut plus être double-encapsulé dans bus.emit
+
+---
+
 ## [0.6.0] — 2026-09-01
 
 ### TUI Hacker (Textual)

@@ -77,7 +77,8 @@ class OAuth2Client:
         if cred.scope:
             data["scope"] = cred.scope
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        from hdwp.core.http_client import build_client
+        async with build_client(timeout=15.0) as client:
             try:
                 resp = await client.post(cred.token_endpoint, data=data)
                 resp.raise_for_status()

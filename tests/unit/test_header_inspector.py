@@ -31,6 +31,10 @@ def test_present_security_headers_not_flagged() -> None:
         "X-Content-Type-Options": "nosniff",
         "X-XSS-Protection": "1; mode=block",
         "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": "geolocation=()",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp",
+        "Cross-Origin-Resource-Policy": "same-origin",
     })
     tags = inspector.inspect(resp)
     missing_tags = [t for t in tags if t.startswith("missing:")]

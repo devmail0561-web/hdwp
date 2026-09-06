@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useScanStore } from '../stores/scanStore'
+import { useFindingsStore } from '../stores/findingsStore'
+import { useFlowStore } from '../stores/flowStore'
 import type { NewSessionRequest, SessionMeta } from '../types/hdwp'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -72,12 +74,16 @@ export function NewSessionPage() {
   const handleResume = async (s: SessionMeta) => {
     setResuming(s.session_id)
     try {
+      useScanStore.getState().clearMetrics()
+      useFindingsStore.getState().setFindings([])
+      useFlowStore.getState().setFlowMap(null)
       const r = await fetch(`/api/session/${s.session_id}/resume`, { method: 'POST' })
       if (!r.ok) { setError(await r.text()); return }
       const data = await r.json() as { session_id: string; target_url: string; status: string }
       setSessionId(data.session_id)
       setTarget(data.target_url)
-      setStatus(data.status === 'running' ? 'running' : data.status === 'done' ? 'done' : 'idle')
+      const validStatuses = ['running', 'done', 'error'] as const
+      setStatus(validStatuses.includes(data.status as typeof validStatuses[number]) ? data.status as typeof validStatuses[number] : 'idle')
     } catch (e) { setError(String(e)) }
     finally { setResuming(null) }
   }
@@ -92,6 +98,9 @@ export function NewSessionPage() {
       return
     }
     setError('')
+    useScanStore.getState().reset()
+    useFindingsStore.getState().setFindings([])
+    useFlowStore.getState().setFlowMap(null)
     setLoading(true)
     try {
       let req: NewSessionRequest

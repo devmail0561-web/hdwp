@@ -59,7 +59,20 @@ def extract_path_value(url: str, path_pattern: str, param_name: str) -> str | No
     for url_seg, pat_seg in zip(url_parts, pat_parts):
         if pat_seg.startswith("{") and pat_seg.endswith("}"):
             slot = pat_seg[1:-1]  # e.g. "id_0"
-            if param_name in slot or slot in param_name or param_name.startswith("path_"):
+            # Match the slot name to the requested parameter name.
+            # Exact name match or substring match covers most cases.
+            # Index-based match: normalizer names path params "path_N" while the
+            # model assigns slot names like "id_N" — both embed the ordinal N.
+            # When param_name is "path_N" and slot ends with "_N" (or just "N"),
+            # match by the shared numeric suffix instead of defaulting to the
+            # first placeholder (the original `startswith("path_")` catch-all was
+            # too broad and returned the wrong segment for multi-segment paths).
+            _index_match = False
+            if param_name.startswith("path_"):
+                _suffix = param_name[len("path_"):]
+                if _suffix.isdigit() and (slot.endswith("_" + _suffix) or slot == _suffix):
+                    _index_match = True
+            if param_name == slot or param_name in slot or slot in param_name or _index_match:
                 return url_seg
     return None
 
@@ -79,8 +92,13 @@ def find_request_with_param(
                 return req
             if location == "body" and isinstance(req.body, dict) and str(req.body.get(param_name, "")) == value:
                 return req
-            if location == "path" and value in req.url:
-                return req
+            if location == "path":
+                # Compare path segments exactly, not as a substring of the full URL.
+                # A substring check like `value in req.url` would wrongly match "1"
+                # in any URL that contains the digit 1 (e.g. /v1/admin/).
+                url_path = urlparse(req.url).path
+                if value in url_path.split("/"):
+                    return req
     return None
 
 
@@ -197,8 +215,12 @@ def plan_object_ref_change(
             vals_b = values_by_role[role_b]
             if not vals_a or not vals_b:
                 continue
-            target_val = vals_b[0]
-            if target_val == vals_a[0]:
+            # Find the first value owned by role_b that role_a has NOT observed.
+            # Limiting to vals_b[0] misses private resources at higher indices when
+            # the first value is a shared/public resource also seen by role_a.
+            vals_a_set = set(vals_a)
+            target_val = next((v for v in vals_b if v not in vals_a_set), None)
+            if target_val is None:
                 continue
             baseline = find_request_with_param(
                 corpus, role_a, param_name, param_location, vals_a[0]
@@ -273,7 +295,15 @@ def plan_privilege_escalation(
         if not requests:
             continue
         obs_role, baseline = requests[0]
-        method = spec.base_request.method or "GET"
+        # Skip tautological plans: if the observed role is the same as the
+        # target_role, we'd replay the request with identical credentials and
+        # the oracle would see no difference — producing a false negative.
+        if obs_role == target_role:
+            continue
+        # Utiliser la méthode réelle de la requête observée dans le corpus.
+        # spec.base_request.method est "" (vide) par convention — ne pas fallback sur "GET"
+        # si le corpus a une vraie méthode (POST, PUT, DELETE…).
+        method = baseline.method if baseline.method else "GET"
         plans.append(ConcreteExperimentPlan(
             hypothesis_id=hyp.id,
             mutation_type="privilege_escalation",
@@ -319,27 +349,77 @@ def plan_field_injection(
     if not payload:
         return []
 
-    # Chercher une requete qui a ce parametre
+    endpoint_path = spec.mutation_params.get("endpoint_path", "")
+
+    def _make_plan(req: NormalizedRequest, role_name: str) -> ConcreteExperimentPlan:
+        return ConcreteExperimentPlan(
+            hypothesis_id=hyp.id,
+            mutation_type="field_injection",
+            baseline_request=req,
+            baseline_role=role_name,
+            target_role=None,
+            mutated_value=payload,
+            mutated_param_name=param_name,
+            mutated_param_location=param_location,
+            description=f"Inject {payload_type.upper()} into '{param_name}': {payload[:30]}",
+            experiment_spec=spec,
+        )
+
+    # Priorité 1 : endpoint_path connu → chercher d'abord dans cet endpoint
+    if endpoint_path:
+        for path, requests in corpus.items():
+            if endpoint_path not in path and path not in endpoint_path:
+                continue
+            for role_name, req in requests:
+                value = extract_param_value(req, param_name, param_location, path)
+                if value is not None:
+                    return [_make_plan(req, role_name)]
+        # Paramètre non observé sur cet endpoint mais endpoint dans le corpus :
+        # utiliser la requête de base de cet endpoint et laisser l'applier injecter le param.
+        for path, requests in corpus.items():
+            if endpoint_path in path or path in endpoint_path:
+                if requests:
+                    role_name, req = requests[0]
+                    return [_make_plan(req, role_name)]
+
+    # Priorité 2 : pas d'endpoint connu → chercher le param dans tout le corpus
     for path, requests in corpus.items():
         for role_name, req in requests:
             value = extract_param_value(req, param_name, param_location, path)
             if value is not None:
-                return [ConcreteExperimentPlan(
-                    hypothesis_id=hyp.id,
-                    mutation_type="field_injection",
-                    baseline_request=req,
-                    baseline_role=role_name,
-                    target_role=None,
-                    mutated_value=payload,
-                    mutated_param_name=param_name,
-                    mutated_param_location=param_location,
-                    description=(
-                        f"Inject {payload_type.upper()} into '{param_name}': {payload[:30]}"
-                    ),
-                    experiment_spec=spec,
-                )]
+                return [_make_plan(req, role_name)]
 
-    # No matching request found — injecting into an unrelated endpoint produces noise.
+    # Priorité 3 : le modèle connaît des méthodes non-GET pour cet endpoint
+    # (découvertes via OPTIONS ou OpenAPI) → créer des baselines synthétiques
+    # Cela permet de tester POST/PUT/DELETE même quand seul GET a été observé.
+    if endpoint_path and model:
+        for ep in model.endpoints:
+            if endpoint_path not in ep.path and ep.path not in endpoint_path:
+                continue
+            non_get_methods = [m for m in ep.methods if m not in ("GET", "HEAD", "OPTIONS")]
+            if not non_get_methods:
+                continue
+            # Chercher n'importe quelle entrée corpus pour cet endpoint (même GET)
+            for path, requests in corpus.items():
+                if endpoint_path not in path and path not in endpoint_path:
+                    continue
+                if not requests:
+                    continue
+                role_name, base_req = requests[0]
+                plans = []
+                for ep_method in non_get_methods[:3]:  # max 3 méthodes
+                    # Créer une baseline synthétique avec la méthode correcte
+                    body_placeholder: dict | None = None
+                    if ep_method in ("POST", "PUT", "PATCH") and param_location == "body":
+                        body_placeholder = {param_name: "placeholder"}
+                    synthetic = base_req.model_copy(update={
+                        "method": ep_method,
+                        "body": body_placeholder if body_placeholder else base_req.body,
+                    })
+                    plans.append(_make_plan(synthetic, role_name))
+                if plans:
+                    return plans
+
     return []
 
 
@@ -484,6 +564,77 @@ def plan_token_reuse(
                         experiment_spec=spec,
                     )]
     return []
+
+
+def plan_method_override(
+    hyp: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """Method override: find GET requests for the target endpoint and add override headers."""
+    override_method = spec.mutation_params.get("override_method", "DELETE")
+    target_path = spec.mutation_params.get("endpoint_path", "")
+    plans = []
+    for path_pattern, entries in corpus.items():
+        if target_path and target_path not in path_pattern:
+            continue
+        for role_name, req in entries[:2]:
+            if req.method.upper() == "GET":
+                plans.append(ConcreteExperimentPlan(
+                    hypothesis_id=hyp.id,
+                    mutation_type="method_override",
+                    baseline_request=req,
+                    baseline_role=role_name,
+                    target_role=None,
+                    mutated_value=override_method,
+                    mutated_param_name=None,
+                    mutated_param_location=None,
+                    description=f"Method override: GET+{override_method} on {path_pattern}",
+                    experiment_spec=spec,
+                ))
+    return plans[:3]
+
+
+HTTP_METHODS_TO_FUZZ = ["POST", "PUT", "DELETE", "PATCH"]
+
+
+def plan_http_method_fuzzing(
+    hyp: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """Pour chaque endpoint découvert, tester toutes les méthodes HTTP."""
+    endpoint_path = spec.mutation_params.get("endpoint_path", "")
+    plans = []
+    seen_patterns: set[str] = set()
+
+    for path_pattern, entries in corpus.items():
+        if endpoint_path and endpoint_path not in path_pattern:
+            continue
+        if path_pattern in seen_patterns:
+            continue
+        seen_patterns.add(path_pattern)
+        if not entries:
+            continue
+        role_name, req = entries[0]
+        for method in HTTP_METHODS_TO_FUZZ:
+            if req.method.upper() == method:
+                continue
+            plans.append(ConcreteExperimentPlan(
+                hypothesis_id=hyp.id,
+                mutation_type="http_method_fuzzing",
+                baseline_request=req,
+                baseline_role=role_name,
+                target_role=None,
+                mutated_value=method,
+                mutated_param_name=None,
+                mutated_param_location=None,
+                description=f"Method fuzzing: {method} on {path_pattern}",
+                experiment_spec=spec,
+            ))
+    return plans[:20]
 
 
 class RequestSelector:

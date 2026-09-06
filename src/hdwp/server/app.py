@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
 
     # Routes API
     from hdwp.server.routes.exploit import router as exploit_router
+    from hdwp.server.routes.payload import router as payload_router
     from hdwp.server.routes.findings import router as findings_router
     from hdwp.server.routes.flow import router as flow_router
     from hdwp.server.routes.health import router as health_router
@@ -58,6 +59,8 @@ def create_app() -> FastAPI:
     from hdwp.server.routes.proxy import router as proxy_router
     from hdwp.server.routes.report import router as report_router
     from hdwp.server.routes.scan import router as scan_router
+    from hdwp.server.routes.console import router as console_router
+    from hdwp.server.routes.script import router as script_router
     from hdwp.server.routes.session import router as session_router
     from hdwp.server.routes.state_route import router as state_router
 
@@ -69,7 +72,10 @@ def create_app() -> FastAPI:
     app.include_router(plugins_router, prefix="/api")
     app.include_router(proxy_router, prefix="/api")
     app.include_router(report_router, prefix="/api")
+    app.include_router(payload_router, prefix="/api")
     app.include_router(exploit_router, prefix="/api")
+    app.include_router(script_router, prefix="/api")
+    app.include_router(console_router)  # no /api prefix — injected JS posts directly to /__hdwp_console__
     app.include_router(flow_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(llm_router, prefix="/api")

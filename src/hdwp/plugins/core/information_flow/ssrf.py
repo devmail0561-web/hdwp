@@ -101,6 +101,11 @@ class SSRFPlugin(HDWPPlugin):
 
     @staticmethod
     def _url_params(model: ApplicationModelData) -> list:
+        # Priorité 1 : signal sémantique direct (modèle a déjà classifié ce paramètre)
+        semantic_matches = [p for p in model.parameters if getattr(p, 'semantic', None) == "url_redirect"]
+        if semantic_matches:
+            return semantic_matches
+        # Fallback : keyword matching si semantic absent
         return [
             p for p in model.parameters
             if any(kw in p.name.lower() for kw in _URL_KEYWORDS)

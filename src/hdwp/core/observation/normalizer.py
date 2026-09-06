@@ -59,9 +59,14 @@ def normalize_request(
     safe_headers = _redact_headers(headers or {})
     path_params = _extract_path_params(parsed.path)
 
-    # Decode form-encoded string bodies into structured dict
+    # Decode form-encoded string bodies into structured dict.
+    # Guard: skip if the body looks like JSON (starts with { or [) to avoid
+    # misinterpreting JSON strings that happen to contain '=' and '&' characters
+    # (e.g. {"url": "https://x.com?a=1&b=2"}).
     parsed_body = body
-    if isinstance(body, str) and "&" in body and "=" in body:
+    _body_stripped = body.lstrip() if isinstance(body, str) else ""
+    _looks_like_json = _body_stripped[:1] in ("{", "[")
+    if isinstance(body, str) and not _looks_like_json and "&" in body and "=" in body:
         try:
             parsed_body = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
         except Exception:  # noqa: BLE001

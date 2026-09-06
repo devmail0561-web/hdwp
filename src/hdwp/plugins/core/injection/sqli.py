@@ -28,12 +28,15 @@ SQL_PARAM_KEYWORDS = frozenset({
 
 # Payloads SQLi classiques
 SQLI_PAYLOADS = [
-    "' OR '1'='1",
-    "1' AND 1=0 UNION SELECT NULL--",
-    "admin'--",
-    "' OR 1=1--",
-    "1' WAITFOR DELAY '0:0:5'--",
-    "1' AND SLEEP(5)--",
+    "' OR '1'='1",                        # boolean blind
+    "1' UNION SELECT NULL--",             # union column detection
+    "admin'--",                           # comment bypass
+    "' OR 1=1--",                         # simple bypass
+    "1' AND SLEEP(5)--",                  # MySQL time-based blind
+    "1' WAITFOR DELAY '0:0:5'--",        # MSSQL time-based blind
+    "1'; SELECT pg_sleep(5)--",          # PostgreSQL time-based blind
+    "1' OR 1=1/**/--",                   # WAF bypass with inline comment
+    "%27 OR %271%27%3D%271",             # URL-encoded bypass
 ]
 
 
@@ -95,14 +98,25 @@ class SQLiPlugin(HDWPPlugin):
         """Génère des hypothèses SQLi pour les paramètres candidats."""
         hypotheses: list[Hypothesis] = []
 
-        # Paramètres candidats
+        # Paramètres candidats — exclure les sémantiques déjà couverts par d'autres plugins
+        # id_ref → BOLA ; file_path → path traversal ; url_redirect → SSRF ; credential → passif
+        EXCLUDED_SEMANTICS = frozenset({"id_ref", "file_path", "url_redirect", "credential"})
         candidates = [
             p for p in model.parameters
-            if any(kw in p.name.lower() for kw in SQL_PARAM_KEYWORDS)
-            and p.type_inferred in ("string", "integer")
-        ][:5]  # Limiter à 5 pour éviter explosion
+            if p.type_inferred in ("string", "integer")
+            and p.affects_object is None  # affects_object = BOLA, pas SQLi
+            and getattr(p, 'semantic', None) not in EXCLUDED_SEMANTICS
+            and (
+                getattr(p, 'semantic', None) is None  # signal sémantique absent → fallback keywords
+                or any(kw in p.name.lower() for kw in SQL_PARAM_KEYWORDS)
+            )
+        ][:5]
 
         for param in candidates:
+            # Trouver les endpoints contenant ce paramètre
+            endpoints = [ep for ep in model.endpoints if param.id in ep.parameters]
+            ep_path = endpoints[0].path if endpoints else ""
+
             # Créer une hypothèse avec plusieurs payloads
             experiments: list[ExperimentSpec] = []
             for payload in SQLI_PAYLOADS[:3]:  # Top 3 payloads
@@ -112,6 +126,7 @@ class SQLiPlugin(HDWPPlugin):
                         base_request=NormalizedRequest(method="GET", url=""),
                         mutation_params={
                             "parameter_name": param.name,
+                            "endpoint_path": ep_path,
                             "parameter_location": param.location,
                             "payload": payload,
                             "payload_type": "sqli",
@@ -125,7 +140,7 @@ class SQLiPlugin(HDWPPlugin):
                     source_plugin=self.id,
                     property_id="",
                     statement=(
-                        f"Le paramètre '{param.name}' est vulnérable à l'injection SQL"
+                        f"[{ep_path}] Le paramètre '{param.name}' est vulnérable à l'injection SQL"
                     ),
                     priority="HIGH",
                     priority_rationale="SQLi permet accès/modification base de données",

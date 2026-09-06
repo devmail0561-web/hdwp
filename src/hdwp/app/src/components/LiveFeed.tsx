@@ -3,14 +3,24 @@ import { useScanStore } from '../stores/scanStore'
 import type { BusEvent } from '../types/hdwp'
 
 const TAG_STYLES: Record<string, { color: string; bg: string }> = {
-  'observation.raw':      { color: '#00d4ff', bg: '#00d4ff22' },
-  'credentials.captured': { color: '#ffd700', bg: '#ffd70022' },
-  'property.inferred':    { color: '#9966ff', bg: '#9966ff22' },
-  'hypothesis.generated': { color: '#ff8c00', bg: '#ff8c0022' },
-  'experiment.result':    { color: '#00aaff', bg: '#00aaff22' },
-  'finding.confirmed':    { color: '#44ff88', bg: '#44ff8811' },
-  'finding.refuted':      { color: '#ff0066', bg: '#ff006622' },
-  'model.updated':        { color: '#9966ff', bg: '#9966ff11' },
+  'observation.raw':              { color: '#00d4ff', bg: '#00d4ff22' },
+  'credentials.captured':         { color: '#ffd700', bg: '#ffd70022' },
+  'property.inferred':            { color: '#9966ff', bg: '#9966ff22' },
+  'hypothesis.generated':         { color: '#ff8c00', bg: '#ff8c0022' },
+  'experiment.result':            { color: '#00aaff', bg: '#00aaff22' },
+  'finding.confirmed':            { color: '#44ff88', bg: '#44ff8811' },
+  'finding.refuted':              { color: '#ff0066', bg: '#ff006622' },
+  'model.updated':                { color: '#9966ff', bg: '#9966ff11' },
+  'fsm.updated':                  { color: '#9966ff', bg: '#9966ff11' },
+  'property.invalidated':         { color: '#445566', bg: 'transparent' },
+  'hypothesis.status_changed':    { color: '#ff8c00', bg: '#ff8c0011' },
+  'diff.computed':                { color: '#00aaff', bg: '#00aaff11' },
+  'report.generated':             { color: '#44ff88', bg: '#44ff8811' },
+  'hypothesis.experiments_ready': { color: '#00aaff', bg: '#00aaff11' },
+  'flow.updated':                 { color: '#9966ff', bg: '#9966ff11' },
+  'auth.required':                { color: '#ff4400', bg: '#ff440022' },
+  'scan.completed':               { color: '#00ff88', bg: '#00ff8822' },
+  'scan.error':                   { color: '#ff0066', bg: '#ff006622' },
 }
 
 const TAG_LABELS: Record<string, string> = {
@@ -31,16 +41,23 @@ function extractText(event: BusEvent): string {
       return `${method} ${url || '?'} → ${sc}`
     }
     case 'model.updated': {
-      const eps = (p?.endpoints as unknown[])?.length ?? 0
-      const conf = typeof p?.model_confidence === 'number' ? `${Math.round((p.model_confidence as number) * 100)}%` : ''
-      return `${eps} endpoint(s) modélisé(s) ${conf}`
+      const eps = Array.isArray(p?.endpoints) ? (p.endpoints as unknown[]).length : 0
+      return `${eps} endpoint(s) modélisé(s)`
     }
     case 'property.inferred':
       return String(p?.formal_statement ?? p?.type ?? '').slice(0, 80)
     case 'hypothesis.generated':
       return String(p?.statement ?? '').slice(0, 80)
-    case 'experiment.result':
-      return `${p?.mutation_type ?? '?'} → ${p?.verdict ?? p?.status ?? '?'}`
+    case 'experiment.result': {
+      const spec = p?.experiment_spec as Record<string, unknown> | undefined
+      const resp = p?.response_received as Record<string, unknown> | undefined
+      return `${spec?.mutation_type ?? '?'} → ${resp?.status_code ?? '?'}`
+    }
+    case 'credentials.captured': {
+      const role = p?.role_name ?? '?'
+      const type = p?.token_type ?? '?'
+      return `${role} — ${type}`
+    }
     case 'finding.confirmed':
       return `[${p?.severity ?? '?'}] ${p?.cwe_id ?? ''} — confiance ${Math.round(((p?.confidence as number) ?? 0) * 100)}%`
     case 'finding.refuted':
@@ -64,7 +81,7 @@ function EventLine({ event }: { event: BusEvent }) {
         color: style.color, border: `1px solid ${style.color}44`,
         background: style.bg,
       }}>{label}</span>
-      <span style={{ color: event.type === 'finding.confirmed' ? '#44ff88' : '#00cc66' }}>
+      <span style={{ color: style.color }}>
         {text}
       </span>
     </div>

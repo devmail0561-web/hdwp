@@ -135,7 +135,8 @@ class AutoRegistrar:
 
     async def _try_post(self, url: str, body: dict) -> dict | None:
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            from hdwp.core.http_client import build_client
+            async with build_client(timeout=10.0) as client:
                 resp = await client.post(url, json=body)
                 if resp.status_code in (200, 201):
                     try:
@@ -180,7 +181,8 @@ class AutoRegistrar:
                             cred = self._created_roles[0].credentials
                             if cred and cred.token:
                                 auth_headers = {"Authorization": f"Bearer {cred.token}"}
-                        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+                        from hdwp.core.http_client import build_client
+                        async with build_client(timeout=5.0) as client:
                             await client.delete(url, headers=auth_headers)
                         log.debug("auto_registrar.account_deleted", uid=uid)
                         break

@@ -156,7 +156,7 @@ class SemanticOracle:
             )
             reproducibility = confirming / len(replays)
         else:
-            reproducibility = 0.7
+            reproducibility = 0.3  # pas de replay → confiance minimale, exige des preuves réelles
 
         obs_quality = compute_observation_quality(max(1, len(all_results)))
         behavioral_spec = compute_behavioral_specificity(
@@ -280,6 +280,8 @@ def _build_finding(
             "diffs": [d.id for d in diffs],
             "reproduction_steps": _build_repro_steps(baseline, assessment),
             "mutation_type": mutation_type,
+            "winning_request": baseline.request_sent.model_dump() if baseline else None,
+            "winning_response_sample": str(baseline.response_received.body)[:2000] if baseline and baseline.response_received else None,
         },
         remediation_hint=remediation(mutation_type),
     )

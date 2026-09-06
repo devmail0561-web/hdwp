@@ -72,4 +72,66 @@ class IntegrityInference:
                     source_observations=[],
                 ))
 
+        # Règle 3 : semantic-driven — exploite ParameterNode.semantic calculé par ApplicationModel
+        # Chaque valeur sémantique correspond à une classe de vulnérabilité distincte.
+        _SEMANTIC_TO_PROPERTY = {
+            "file_path": (
+                "input('{name}', location='{loc}') must reject ../ path traversal sequences",
+                0.85,
+            ),
+            "url_redirect": (
+                "input('{name}', location='{loc}') must validate URL to trusted domains only (SSRF/redirect)",
+                0.80,
+            ),
+            "template_expr": (
+                "input('{name}', location='{loc}') must not be evaluated as template expression (SSTI)",
+                0.80,
+            ),
+            "xml_input": (
+                "input('{name}', location='{loc}') XML parser must disable external entity processing (XXE)",
+                0.85,
+            ),
+            "credential": (
+                "input('{name}', location='{loc}') must not transmit credentials in cleartext",
+                0.90,
+            ),
+        }
+
+        seen_semantic: set[tuple[str, str, str]] = set()
+        for param in model.parameters:
+            if not param.semantic or param.semantic not in _SEMANTIC_TO_PROPERTY:
+                continue
+            key = (param.semantic, param.name, param.location)
+            if key in seen_semantic:
+                continue
+            seen_semantic.add(key)
+
+            stmt_template, confidence = _SEMANTIC_TO_PROPERTY[param.semantic]
+            statement = stmt_template.format(name=param.name, loc=param.location)
+
+            if statement in seen_statements:
+                continue
+            seen_statements.add(statement)
+
+            # Boost confidence pour xml_input si l'endpoint accepte effectivement du XML
+            if param.semantic == "xml_input":
+                for ep in model.endpoints:
+                    if param.id in ep.parameters and getattr(ep, "accepts_xml", False):
+                        confidence = 0.95
+                        break
+
+            node_ids: list[str] = [param.id]
+            for ep in model.endpoints:
+                if param.id in ep.parameters:
+                    node_ids.append(ep.id)
+
+            properties.append(SecurityProperty(
+                id=generate_id("PROP"),
+                type=PropertyType.INTEGRITY,
+                formal_statement=statement,
+                model_nodes=node_ids[:5],
+                inference_confidence=confidence,
+                source_observations=[],
+            ))
+
         return properties

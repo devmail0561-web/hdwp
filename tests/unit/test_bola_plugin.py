@@ -23,6 +23,7 @@ def _model_with_bola_param() -> ApplicationModelData:
                 methods=["GET"],
                 auth_required=True,
                 roles_observed=["user_a"],
+                parameters=["PARAM-1"],  # wire endpoint → parameter
             )
         ],
         parameters=[

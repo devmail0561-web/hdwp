@@ -39,7 +39,8 @@ class HypothesisPrioritizer:
         surface = affected_node_count / max(total_endpoints, 1)
         obs_factor = min(1.0, observation_count / 5)
 
-        score = impact * max(surface, 0.1) * max(obs_factor, 0.1)
+        # Floor raised to 0.25 so large APIs (many endpoints) can still reach HIGH priority
+        score = impact * max(surface, 0.25) * max(obs_factor, 0.1)
 
         if score >= 0.6:
             level = "HIGH"

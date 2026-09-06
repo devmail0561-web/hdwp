@@ -30,12 +30,16 @@ class WebSocketManager:
         log.debug("ws.disconnected", total=len(self._connections))
 
     async def broadcast(self, data: dict) -> None:
-        dead: set[WebSocket] = set()
-        for ws in list(self._connections):
-            try:
-                await ws.send_json(data)
-            except Exception:
-                dead.add(ws)
+        # Send to all connections concurrently so that one slow or unresponsive
+        # client does not stall delivery to all others.
+        connections = list(self._connections)
+        if not connections:
+            return
+        results = await asyncio.gather(
+            *[ws.send_json(data) for ws in connections],
+            return_exceptions=True,
+        )
+        dead = {ws for ws, result in zip(connections, results) if isinstance(result, Exception)}
         if dead:
             async with self._lock:
                 self._connections -= dead

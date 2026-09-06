@@ -13,6 +13,8 @@ class StateResponse(BaseModel):
     endpoint_count: int = 0
     hypothesis_count: int = 0
     findings_count: int = 0
+    property_count: int = 0
+    experiment_count: int = 0
     proxy_active: bool = False
     error_message: str = ""
 

@@ -4,7 +4,7 @@ import type { FlowMap } from '../types/hdwp'
 interface FlowStore {
   flowMap: FlowMap | null
   loading: boolean
-  setFlowMap(fm: FlowMap): void
+  setFlowMap(fm: FlowMap | null): void
   fetchFlowMap(): Promise<void>
 }
 
