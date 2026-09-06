@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from hdwp.core.context.config_schema import CredentialConfig, RoleConfig
-from hdwp.core.experiment.mutation_module import MutationModule, _replace_first_id_in_path
+from hdwp.core.experiment.mutation_module import MutationModule, _replace_id_in_path as _replace_first_id_in_path
 from hdwp.core.experiment.session_manager import SessionManager
 from hdwp.core.model.schemas import ConcreteExperimentPlan, ExperimentSpec, NormalizedRequest
 

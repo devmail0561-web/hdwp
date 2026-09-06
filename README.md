@@ -22,7 +22,10 @@ Les classifications OWASP/CWE sont appliquées *a posteriori* sur les findings �
 
 ## Features
 
-- **34 vecteurs de détection** — plugins sémantiques couvrant OWASP Web Top 10, OWASP API Security Top 10, et CWEs web critiques
+- **37 vecteurs de détection** — plugins sémantiques couvrant OWASP Web Top 10, OWASP API Security Top 10, et CWEs web critiques
+- **Détection d'anomalies inconnues** — Z-score comportemental, ratio de taille de réponse, entropie des champs (tokens/clés) — détecte sans signature
+- **Mutations comportementales** — type confusion (CWE-843), boundary values (CWE-190), parameter pollution (CWE-915)
+- **Boucle de feedback** — findings confirmés → nouvelles hypothèses d'approfondissement automatiques
 - **Couverture multi-méthodes** — sonde POST/PUT/PATCH sur chaque endpoint GET découvert
 - **Oracle comportemental** — compare baseline vs mutation avec `data_identity_score` (pas seulement les patterns)
 - **Tor par défaut** — tout le trafic passe par `socks5h://127.0.0.1:9150`
@@ -83,7 +86,7 @@ MODEL       → EndpointNode, ParameterNode (semantic), DataObjectNode (sensitiv
 INFER       → SecurityProperty depuis le graphe sémantique (34 modules)
 HYPOTHESIZE → Hypothèses falsifiables par (endpoint × mutation × param)
 EXPERIMENT  → baseline + mutation (méthode réelle du corpus)
-ORACLE      → SemanticDiff + data_identity_score + violation assessors
+ORACLE      → SemanticDiff + data_identity_score + anomaly detection (Z-score, size ratio, entropy)
 CHAIN       → Corrélation multi-findings (BOLA+SQLi, CORS+XSS…)
 REPORT      → Findings avec impact, scénarios d'attaque, remédiations
 ```

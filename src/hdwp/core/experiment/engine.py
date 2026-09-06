@@ -132,6 +132,18 @@ class ExperimentEngine:
                 plan.baseline_request, hyp.id, plan.experiment_spec,
                 role=plan.baseline_role,
             )
+            # Abandonner le plan si la baseline est invalide (endpoint disparu, mauvais path).
+            # Tester une mutation contre une baseline 404/500 pollue l'oracle et gaspille
+            # des slots de rate-limiter sans valeur ajoutée.
+            base_status = baseline.response_received.status_code if baseline.response_received else 0
+            if base_status in (404, 500, 502, 503):
+                log.debug(
+                    "experiment.baseline_invalid_skip",
+                    hypothesis_id=hyp.id,
+                    url=plan.baseline_request.url,
+                    status=base_status,
+                )
+                continue
             if baseline_id is None:
                 baseline_id = baseline.id
             self._results_buffer[hyp.id].append(baseline)

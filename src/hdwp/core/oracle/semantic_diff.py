@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import math
+import re
+
 from hdwp.core.model.schemas import DiffVerdict, NormalizedResponse, SemanticDiff, generate_id
 
 VOLATILE_FIELDS = frozenset({
@@ -11,12 +14,27 @@ VOLATILE_FIELDS = frozenset({
     "_timestamp", "ts", "iat", "exp", "jti",
 })
 
+SECURITY_HEADERS = frozenset({
+    "content-security-policy", "strict-transport-security", "x-frame-options",
+    "x-content-type-options", "cache-control", "set-cookie",
+    "access-control-allow-origin", "permissions-policy",
+})
+
+_SENSITIVE_PATTERNS = [
+    re.compile(r'^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'),  # JWT
+    re.compile(r'^[0-9a-fA-F]{32,}$'),                                     # hex hash/key
+    re.compile(r'^[A-Za-z0-9+/]{40,}={0,2}$'),                            # base64 token
+    re.compile(r'.+@.+\..+'),                                              # email
+    re.compile(r'^\d{13,16}$'),                                            # card/phone
+]
+
 
 def compute_semantic_diff(
     baseline: NormalizedResponse,
     experiment: NormalizedResponse,
     exp_a_id: str,
     exp_b_id: str,
+    response_zscore: float | None = None,
 ) -> SemanticDiff:
     """Compare two responses on behavioral semantics, not raw equality."""
     status_diff = baseline.status_code != experiment.status_code
@@ -54,6 +72,42 @@ def compute_semantic_diff(
 
     data_identity = _compute_data_identity(baseline.body, experiment.body)
 
+    # ── Anomaly detection (unknown vulnerability indicators) ──────────────
+
+    # 1. Response size ratio — large increase may indicate data extraction
+    base_size = len(str(baseline.body)) if baseline.body is not None else 0
+    exp_size = len(str(experiment.body)) if experiment.body is not None else 0
+    size_ratio: float | None = exp_size / base_size if base_size > 0 else None
+
+    if size_ratio is not None and size_ratio >= 2.0:
+        if verdict == DiffVerdict.INSIGNIFICANT:
+            verdict = DiffVerdict.AMBIGUOUS
+            rationale = f"Response size anomaly: {size_ratio:.1f}x larger than baseline"
+        elif verdict == DiffVerdict.AMBIGUOUS:
+            verdict = DiffVerdict.SIGNIFICANT
+            rationale = f"Response {size_ratio:.1f}x larger — potential data extraction"
+
+    # 2. High-entropy / sensitive fields UNIQUEMENT présents dans experiment et pas dans baseline
+    # Bug fix: comparer vs baseline pour éviter les faux positifs sur les APIs qui retournent
+    # toujours des tokens (ex: Authorization JWT dans chaque réponse)
+    base_suspicious = set(_detect_suspicious_fields(baseline.body))
+    exp_suspicious = set(_detect_suspicious_fields(experiment.body))
+    suspicious = sorted(exp_suspicious - base_suspicious)  # seulement les NOUVEAUX champs sensibles
+
+    # 3. Security headers added or removed
+    base_headers = dict(baseline.headers) if isinstance(baseline.headers, dict) else {}
+    exp_headers = dict(experiment.headers) if isinstance(experiment.headers, dict) else {}
+    sec_delta = _security_header_delta(base_headers, exp_headers)
+
+    # Z-score behavioral anomaly: statistically unusual response size vs historical baseline
+    if response_zscore is not None and abs(response_zscore) > 2.5:
+        if verdict == DiffVerdict.INSIGNIFICANT:
+            verdict = DiffVerdict.AMBIGUOUS
+            rationale = f"Behavioral anomaly: Z-score={response_zscore:.1f} (statistically unusual response size)"
+        elif verdict == DiffVerdict.AMBIGUOUS:
+            verdict = DiffVerdict.SIGNIFICANT
+            rationale = f"Behavioral anomaly confirmed: Z-score={response_zscore:.1f}"
+
     return SemanticDiff(
         id=generate_id("DIFF"),
         exp_a=exp_a_id,
@@ -64,6 +118,10 @@ def compute_semantic_diff(
         status_difference=status_diff,
         body_similarity=jaccard,
         data_identity_score=data_identity,
+        response_size_ratio=size_ratio,
+        response_zscore=response_zscore,
+        suspicious_fields=suspicious,
+        security_headers_delta=sec_delta,
         verdict=verdict,
         verdict_rationale=rationale,
     )
@@ -84,6 +142,60 @@ def _values_differ(body_a: object, body_b: object) -> bool:
         if body_a[k] != body_b[k]:
             return True
     return False
+
+
+def _field_entropy(s: str) -> float:
+    """Shannon entropy of a string in bits per character."""
+    if not s:
+        return 0.0
+    freq: dict[str, int] = {}
+    for c in s:
+        freq[c] = freq.get(c, 0) + 1
+    n = len(s)
+    return -sum(f / n * math.log2(f / n) for f in freq.values())
+
+
+def _detect_suspicious_fields(body: object, depth: int = 0) -> list[str]:
+    """Find fields with high entropy or sensitive patterns — potential data leaks.
+
+    Detects: JWT tokens, hex hashes, base64 API keys, emails, card numbers.
+    Works recursively to depth 3 to cover nested JSON structures.
+    """
+    if depth > 3 or not isinstance(body, dict):
+        return []
+    suspicious: list[str] = []
+    for k, v in body.items():
+        if isinstance(v, str) and len(v) >= 16:
+            entropy = _field_entropy(v)
+            is_sensitive = entropy > 4.5 or any(p.match(v) for p in _SENSITIVE_PATTERNS)
+            if is_sensitive:
+                suspicious.append(k)
+        elif isinstance(v, dict):
+            for nested_k in _detect_suspicious_fields(v, depth + 1):
+                suspicious.append(f"{k}.{nested_k}")
+        elif isinstance(v, list) and v and isinstance(v[0], dict):
+            for nested_k in _detect_suspicious_fields(v[0], depth + 1):
+                suspicious.append(f"{k}[].{nested_k}")
+    return suspicious
+
+
+def _security_header_delta(
+    base_headers: dict[str, str],
+    exp_headers: dict[str, str],
+) -> dict[str, str]:
+    """Detect security-relevant headers added or removed between baseline and experiment.
+
+    A removed security header (e.g. Cache-Control: no-store disappears) may indicate
+    the mutation triggered a different code path with weaker protections.
+    """
+    base_sec = {k.lower() for k in base_headers if k.lower() in SECURITY_HEADERS}
+    exp_sec = {k.lower() for k in exp_headers if k.lower() in SECURITY_HEADERS}
+    delta: dict[str, str] = {}
+    for h in exp_sec - base_sec:
+        delta[h] = "added"
+    for h in base_sec - exp_sec:
+        delta[h] = "removed"
+    return delta
 
 
 _IDENTITY_FIELDS = frozenset({

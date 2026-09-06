@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from hdwp.core.bus.event_bus import AsyncEventBus
-from hdwp.core.bus.events import HYPOTHESIS_GENERATED, PROPERTY_INFERRED, HDWPEvent
+from hdwp.core.bus.events import FINDING_CONFIRMED, HYPOTHESIS_GENERATED, PROPERTY_INFERRED, HDWPEvent
 from hdwp.core.hypothesis.prioritizer import HypothesisPrioritizer
 from hdwp.core.model.schemas import (
     ApplicationModelData,
@@ -140,6 +140,7 @@ class HypothesisEngine:
         self._repository = repository
         self._llm_layer = llm_layer
         bus.on(PROPERTY_INFERRED, self._on_property_inferred)
+        bus.on(FINDING_CONFIRMED, self._on_finding_confirmed)
 
     async def _on_property_inferred(self, event: HDWPEvent) -> None:
         prop_data = event.payload
@@ -501,6 +502,112 @@ class HypothesisEngine:
         import re
         m = re.search(r"location='([^']+)'", statement)
         return m.group(1) if m else "query"
+
+    async def _on_finding_confirmed(self, event: HDWPEvent) -> None:
+        """Boucle de feedback : quand un finding est confirmé, générer des hypothèses d'approfondissement.
+
+        Exemple : SQLi confirmée sur /api/users?id → générer hypothèses stacked queries,
+        time-based sur d'autres paramètres, UNION SELECT multi-colonnes.
+        C'est ce qui différencie HDWP d'un scanner : il capitalise sur ses propres découvertes.
+        """
+        data = event.payload
+        if not isinstance(data, dict):
+            return
+
+        mutation_type = data.get("proof", {}).get("mutation_type", "") if isinstance(data.get("proof"), dict) else ""
+        cwe_id = data.get("cwe_id", "")
+        endpoints = data.get("affected_endpoints", [])
+        if not endpoints:
+            return
+        endpoint = endpoints[0]
+
+        followup: list[Hypothesis] = []
+
+        # SQLi confirmée → approfondir avec des techniques avancées
+        # Bug fix: "sql" in mutation_type.lower() est dead code quand mutation_type="field_injection"
+        # Fix: utiliser cwe_id pour détecter SQLi
+        if mutation_type == "field_injection" and cwe_id in ("CWE-89",):
+            proof = data.get("proof", {})
+            wr = proof.get("winning_request") or {} if isinstance(proof, dict) else {}
+            # Bug fix: body peut être string ou list — ne pas appeler .keys() sur un non-dict
+            body = wr.get("body") if isinstance(wr, dict) else None
+            body_keys = list(body.keys()) if isinstance(body, dict) else []
+            query_keys = list((wr.get("query_params") or {}).keys()) if isinstance(wr, dict) else []
+            params = query_keys or body_keys
+            param_name = params[0] if params else "id"
+            param_loc = "query" if wr.get("query_params") and param_name in (wr.get("query_params") or {}) else "body"
+
+            advanced_sqli = [
+                ("1'; SELECT table_name FROM information_schema.tables LIMIT 5--", "sqli_schema_enum"),
+                ("1' UNION SELECT NULL,NULL,NULL,NULL,NULL--", "sqli_union_5col"),
+                ("1' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version())))--", "sqli_error_based"),
+                ("1' OR SLEEP(10)--", "sqli_blind_10s"),
+            ]
+            for payload, p_type in advanced_sqli:
+                hyp = Hypothesis(
+                    source_plugin="hypothesis_engine.followup",
+                    property_id="",
+                    statement=f"[FOLLOWUP SQLi] [{endpoint}] {param_name} → {p_type}",
+                    priority="HIGH",
+                    priority_rationale="Approfondissement post-confirmation SQLi",
+                    required_experiments=[ExperimentSpec(
+                        mutation_type="field_injection",
+                        base_request=NormalizedRequest(method="", url=""),
+                        mutation_params={
+                            "parameter_name": param_name,
+                            "parameter_location": param_loc,
+                            "payload": payload,
+                            "payload_type": "sqli",
+                            "endpoint_path": endpoint,
+                        },
+                        description=f"SQLi follow-up: {p_type}",
+                    )],
+                )
+                followup.append(hyp)
+
+        # BOLA/IDOR confirmée → tester d'autres endpoints avec le même pattern
+        if cwe_id == "CWE-639":
+            idor_variants = [
+                ("0", "idor_zero"),
+                ("-1", "idor_negative"),
+                ("999999", "idor_large"),
+            ]
+            proof = data.get("proof", {})
+            wr = proof.get("winning_request") or {} if isinstance(proof, dict) else {}
+            params = list((wr.get("query_params") or {}).keys()) if isinstance(wr, dict) else []
+            param_name = params[0] if params else "id"
+            for val, label in idor_variants:
+                hyp = Hypothesis(
+                    source_plugin="hypothesis_engine.followup",
+                    property_id="",
+                    statement=f"[FOLLOWUP BOLA] [{endpoint}] {param_name}={val} → {label}",
+                    priority="HIGH",
+                    priority_rationale="Énumération post-confirmation BOLA",
+                    required_experiments=[ExperimentSpec(
+                        mutation_type="object_ref_change",
+                        base_request=NormalizedRequest(method="", url=""),
+                        mutation_params={
+                            "parameter_name": param_name,
+                            "parameter_location": "query",
+                            "target_value": val,
+                            "endpoint_path": endpoint,
+                        },
+                        description=f"BOLA variant: {param_name}={val}",
+                    )],
+                )
+                followup.append(hyp)
+
+        # Enregistrer les hypothèses de suivi non-dupliquées
+        for hyp in followup:
+            if not self._is_duplicate(hyp):
+                self._hypotheses[hyp.id] = hyp
+                self._register_hypothesis_keys(hyp)
+                if self._repository is not None:
+                    try:
+                        await self._repository.save_hypothesis(hyp)
+                    except Exception:  # noqa: BLE001
+                        pass
+                await self._bus.emit(HYPOTHESIS_GENERATED, hyp.model_dump(), source="hypothesis_engine")
 
     def _is_duplicate(self, hyp: Hypothesis) -> bool:
         """Déduplique par (endpoint_path, mutation_type, param_name).

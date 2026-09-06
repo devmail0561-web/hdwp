@@ -6,6 +6,60 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
+## [2.1.0] — 2026-09-06 — Détection d'anomalies inconnues, mutations enrichies, bugfixes oracle
+
+### Détection de vulnérabilités inconnues (anomalies comportementales)
+
+**Ajoutés**
+- `SemanticDiff.response_size_ratio` : ratio taille expérience/baseline — déclenche AMBIGUOUS si >2× et SIGNIFICANT si >3×
+- `SemanticDiff.suspicious_fields` : delta des champs haute-entropie (JWT, tokens, clés hex, emails) nouveaux dans l'expérience vs baseline
+- `SemanticDiff.security_headers_delta` : headers de sécurité ajoutés ou supprimés entre baseline et expérience
+- `SemanticDiff.response_zscore` : score Z de la taille de réponse vs profil historique de l'endpoint (≥5 observations requises)
+- `ApplicationModel._behavioral_profiles` : profil rolling window (50 obs.) par endpoint — moyenne/écart-type de taille de réponse
+- `ApplicationModel.get_response_zscore()` : Z-score comportemental par endpoint
+- `_assess_behavioral_anomaly()` dans `violation_oracle.py` : assesseur générique détectant les anomalies SANS signature connue
+- `SemanticOracle.model_accessor` : accès au modèle pour le calcul Z-score dans l'oracle
+
+### Nouvelles mutations (type confusion, valeurs limites, pollution de paramètres)
+
+**Ajoutés**
+- `apply_type_confusion` : envoie le mauvais type pour détecter l'absence de validation (PHP juggling, loose JS comparisons)
+- `apply_boundary_value` : MAX_INT, MIN_INT, null, "", 65536 chars — détecte les overflows et comportements inattendus
+- `apply_parameter_pollution` : injecte des champs inconnus/privilégiés pour détecter la sur-acceptation (is_admin, __proto__)
+- `AnomalyProbingPlugin` : génère des hypothèses type_confusion et boundary_value pour chaque endpoint/paramètre
+- 3 nouvelles mutations enregistrées : `type_confusion` (CWE-843), `boundary_value` (CWE-190), `parameter_pollution` (CWE-915)
+
+### Moteur d'hypothèses — Boucle de feedback
+
+**Ajoutés**
+- `HypothesisEngine._on_finding_confirmed()` : abonné à `FINDING_CONFIRMED` — génère des hypothèses d'approfondissement post-confirmation (SQLi confirmée → stacked queries, UNION multi-colonnes, time-based 10s ; BOLA confirmée → variantes d'ID 0/-1/999999)
+
+### Moteur d'expérimentation — Qualité
+
+**Corrigés**
+- `ExperimentEngine._run_hypothesis()` : baselines invalides (404/500/502/503) abandonnées avant exécution
+- `oracle/engine.py` : `n_experiments_required = max(2, mutations+replays)` — experiment_coverage honnête (1 mutation sans replay → coverage < 1.0)
+- Suppression des troncatures `[:3]` dans SQLi, XSS, CMDi, path_traversal, NoSQLi — tous les payloads testés
+
+### Mutations — Correctifs
+
+**Corrigés**
+- `_replace_id_in_path` : utilise `rsplit("_id", 1)[0]` au lieu de double replace — `video_id` → `video` (pas `veo`)
+- `apply_field_injection` : double URL-encoding supprimé (encodage limité à location="path")
+- `apply_path_traversal` : branche `location="path"` ajoutée, encodages non perdus
+- `apply_nosqli` : double import `json` supprimé
+- `apply_field_injection` : support `location="cookie"` et JSON imbriqué (`_inject_nested`)
+
+### Oracle — Bugfixes
+
+**Corrigés**
+- `_on_finding_confirmed` : crash `AttributeError` sur body string/list supprimé (`isinstance(body, dict)`)
+- `_on_finding_confirmed` : dead code `'sql' in mutation_type.lower()` remplacé par `cwe_id in ("CWE-89",)`
+- `SemanticDiff.suspicious_fields` : faux positifs supprimés — delta `exp - base` au lieu de tous les champs exp
+- Z-score connecté au pipeline oracle via `SemanticOracle(model_accessor=app_model.snapshot)`
+
+---
+
 ## [2.0.0] — 2026-09-06 — Refonte majeure : moteur sémantique, couverture multi-méthodes, détection étendue
 
 ### Moteur d'hypothèses — Retour aux principes sémantiques

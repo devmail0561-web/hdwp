@@ -1,6 +1,6 @@
 # HDWP Engine — Document d'architecture
 
-**Version :** 2.0.0  
+**Version :** 2.1.0  
 **Auteur :** M. TENDENG  
 **Date :** 2026-09-06
 
@@ -501,7 +501,7 @@ src/hdwp/
 
 ## 3. Plugins de détection
 
-**34 plugins actifs** organisés par catégorie CWE/OWASP :
+**35 plugins actifs** organisés par catégorie CWE/OWASP :
 
 ### Authorization
 - `bola` (CWE-639) — BOLA/IDOR via `affects_object`
@@ -516,6 +516,7 @@ src/hdwp/
 - `xxe` (CWE-611), `graphql` (CWE-200/284), `crlf` (CWE-113)
 - `deserialization` (CWE-502), `ldap_injection` (CWE-90), `xpath_injection` (CWE-643)
 - `el_injection` (CWE-917), `prototype_pollution` (CWE-1321)
+- `anomaly_probing` — type confusion + boundary values (détection comportementale sans signature)
 
 ### Configuration
 - `cors` (CWE-942), `security_headers` (CWE-693)
@@ -532,3 +533,25 @@ src/hdwp/
 ### Business Logic / File
 - `business_boundary` (CWE-840), `race_condition` (CWE-362)
 - `file_upload` (CWE-434)
+
+---
+
+## 4. Détection d'anomalies inconnues
+
+HDWP peut détecter des vulnérabilités inconnues sans signature :
+
+### Oracle comportemental
+- **`response_size_ratio`** : une réponse 2× plus grande que la baseline indique une extraction de données
+- **`suspicious_fields`** : champs haute-entropie (tokens, clés) apparus dans l'expérience mais absents du baseline
+- **`security_headers_delta`** : dégradation des headers de sécurité sous certaines mutations
+- **`response_zscore`** : déviation statistique (Z > 2.5) vs profil historique de l'endpoint
+
+### Mutations d'anomalie
+- **`type_confusion`** : envoyer le mauvais type révèle les absences de validation (PHP, JS, Go)
+- **`boundary_value`** : MAX_INT, null, empty — révèle les overflows et comportements edge-case
+- **`parameter_pollution`** : champs inconnus acceptés → mass assignment, prototype pollution
+
+### Boucle de feedback
+Quand un finding est CONFIRMED → `HypothesisEngine._on_finding_confirmed()` génère des hypothèses d'approfondissement sans intervention humaine :
+- SQLi → stacked queries, UNION multi-colonnes, time-based blind
+- BOLA → variantes d'ID (0, -1, 999999)

@@ -288,7 +288,60 @@ def _assess_cors(
     )
 
 
+def _assess_behavioral_anomaly(diff: SemanticDiff) -> ViolationAssessment | None:
+    """Détecteur d'anomalies comportementales pour les vulnérabilités inconnues.
+
+    Ne requiert aucune signature connue — détecte des déviations statistiques
+    ou structurelles qui peuvent indiquer une vulnérabilité non encore cataloguée.
+    Retourne None si aucune anomalie significative n'est détectée.
+    """
+    reasons: list[str] = []
+    confidence = 0.0
+
+    # Anomalie de taille : réponse anormalement grande (extraction de données potentielle)
+    size_ratio = getattr(diff, "response_size_ratio", None)
+    if size_ratio is not None:
+        if size_ratio >= 3.0:
+            reasons.append(f"Réponse {size_ratio:.1f}× plus grande — extraction de données suspectée")
+            confidence = max(confidence, 0.65)
+        elif size_ratio >= 2.0:
+            reasons.append(f"Réponse {size_ratio:.1f}× plus grande — anomalie comportementale")
+            confidence = max(confidence, 0.45)
+
+    # Z-score : réponse statistiquement inhabituelle vs historique de l'endpoint
+    zscore = getattr(diff, "response_zscore", None)
+    if zscore is not None and abs(zscore) > 3.0:
+        reasons.append(f"Anomalie statistique : Z={zscore:.1f} (hors distribution historique)")
+        confidence = max(confidence, 0.60)
+
+    # Champs suspects : tokens, hashes, emails dans la réponse
+    suspicious = getattr(diff, "suspicious_fields", [])
+    if suspicious:
+        reasons.append(f"Champs haute-entropie détectés : {suspicious[:3]}")
+        confidence = max(confidence, 0.55)
+
+    # Dégradation des headers de sécurité
+    sec_delta = getattr(diff, "security_headers_delta", {})
+    removed = [h for h, v in sec_delta.items() if v == "removed"]
+    if removed:
+        reasons.append(f"Headers de sécurité supprimés : {removed}")
+        confidence = max(confidence, 0.50)
+
+    if reasons and confidence >= 0.45:
+        return ViolationAssessment(
+            verdict=ViolationVerdict.AMBIGUOUS,
+            rationale=" | ".join(reasons),
+            confidence_hint=confidence,
+        )
+    return None
+
+
 def _assess_generic(diff: SemanticDiff) -> ViolationAssessment:
+    # Tenter la détection d'anomalie comportementale (vulnérabilités inconnues)
+    behavioral = _assess_behavioral_anomaly(diff)
+    if behavioral is not None:
+        return behavioral
+
     match diff.verdict:
         case DiffVerdict.SIGNIFICANT:
             return ViolationAssessment(

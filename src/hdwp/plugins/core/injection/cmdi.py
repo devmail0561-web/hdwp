@@ -103,7 +103,7 @@ class CMDiPlugin(HDWPPlugin):
                     },
                     description=f"CMDi test: {param.name}={payload}",
                 )
-                for payload in CMDI_PAYLOADS[:3]
+                for payload in CMDI_PAYLOADS
             ]
             hypotheses.append(
                 Hypothesis(

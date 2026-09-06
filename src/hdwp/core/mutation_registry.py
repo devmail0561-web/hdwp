@@ -321,6 +321,24 @@ def _register_builtins() -> None:
             "cwe_id": "CWE-284",
             "remediation": "Appliquer des contrôles d'autorisation cohérents pour chaque méthode HTTP acceptée.",
         },
+        {
+            "name": "type_confusion",
+            "owasp_category": "A03:2021",
+            "cwe_id": "CWE-843",
+            "remediation": "Valider et typer strictement tous les paramètres d'entrée côté serveur.",
+        },
+        {
+            "name": "boundary_value",
+            "owasp_category": "A04:2021",
+            "cwe_id": "CWE-190",
+            "remediation": "Gérer les cas limites : null, valeurs négatives, dépassements d'entier, chaînes vides.",
+        },
+        {
+            "name": "parameter_pollution",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-915",
+            "remediation": "Filtrer et whitelist les paramètres acceptés, rejeter les champs inconnus.",
+        },
     ]
     for meta in _metadata:
         try:
@@ -331,14 +349,20 @@ def _register_builtins() -> None:
     # Enrichissement avec plan/apply : isolation par import, chaque mutation independante.
     try:
         from hdwp.core.experiment.mutation_module import (
+            apply_boundary_value,
             apply_field_injection,
             apply_http_method_fuzzing,
             apply_identity_swap,
             apply_jwt_manipulation,
             apply_method_override,
+            apply_nosqli,
             apply_object_ref_change,
+            apply_open_redirect,
             apply_origin_test,
+            apply_parameter_pollution,
+            apply_path_traversal,
             apply_privilege_escalation,
+            apply_type_confusion,
             apply_race_condition,
             apply_token_reuse,
         )
@@ -365,10 +389,13 @@ def _register_builtins() -> None:
             ("race_condition",       plan_race_condition,       apply_race_condition),
             ("token_reuse",          plan_token_reuse,          apply_token_reuse),
             ("method_override",      plan_method_override,      apply_method_override),
-            ("path_traversal",       plan_field_injection,      apply_field_injection),
-            ("nosqli",               plan_field_injection,      apply_field_injection),
-            ("open_redirect",        plan_field_injection,      apply_field_injection),
+            ("path_traversal",       plan_field_injection,      apply_path_traversal),
+            ("nosqli",               plan_field_injection,      apply_nosqli),
+            ("open_redirect",        plan_field_injection,      apply_open_redirect),
             ("http_method_fuzzing",  plan_http_method_fuzzing,  apply_http_method_fuzzing),
+            ("type_confusion",       plan_field_injection,      apply_type_confusion),
+            ("boundary_value",       plan_field_injection,      apply_boundary_value),
+            ("parameter_pollution",  plan_field_injection,      apply_parameter_pollution),
         ]
         for mut_name, plan_fn, apply_fn in _plan_apply:
             entry = _MUTATIONS.get(mut_name)

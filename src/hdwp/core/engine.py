@@ -225,7 +225,8 @@ class HDWPEngine:
             prioritizer=prioritizer,
             llm_layer=llm_layer,
         )
-        oracle = SemanticOracle(bus, repository, llm_layer=llm_layer)
+        oracle = SemanticOracle(bus, repository, llm_layer=llm_layer,
+                                model_accessor=app_model.snapshot)  # connecte le Z-score comportemental
         PassiveFindingEngine(bus, repository)
         report_engine = ReportEngine(bus, repository)
 

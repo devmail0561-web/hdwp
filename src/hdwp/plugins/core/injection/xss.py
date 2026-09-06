@@ -121,7 +121,7 @@ class XSSPlugin(HDWPPlugin):
                 continue
 
             experiments: list[ExperimentSpec] = []
-            for payload in XSS_PAYLOADS[:3]:
+            for payload in XSS_PAYLOADS:
                 experiments.append(
                     ExperimentSpec(
                         mutation_type="field_injection",

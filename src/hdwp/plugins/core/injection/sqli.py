@@ -119,7 +119,7 @@ class SQLiPlugin(HDWPPlugin):
 
             # Créer une hypothèse avec plusieurs payloads
             experiments: list[ExperimentSpec] = []
-            for payload in SQLI_PAYLOADS[:3]:  # Top 3 payloads
+            for payload in SQLI_PAYLOADS:  # Top 3 payloads
                 experiments.append(
                     ExperimentSpec(
                         mutation_type="field_injection",

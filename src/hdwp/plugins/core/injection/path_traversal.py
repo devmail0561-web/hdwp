@@ -102,7 +102,7 @@ class PathTraversalPlugin(HDWPPlugin):
                     },
                     description=f"Path traversal: {param.name}={payload[:30]}",
                 )
-                for payload in PATH_TRAVERSAL_PAYLOADS[:3]
+                for payload in PATH_TRAVERSAL_PAYLOADS
             ]
             hypotheses.append(
                 Hypothesis(

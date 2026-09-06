@@ -68,10 +68,12 @@ class SemanticOracle:
         bus: AsyncEventBus,
         repository: Repository,
         llm_layer: LLMLayerProtocol | None = None,
+        model_accessor: object = None,
     ) -> None:
         self._bus = bus
         self._repo = repository
         self._llm_layer = llm_layer
+        self._model_accessor = model_accessor  # Callable[[], ApplicationModel] | None
         self._results: dict[str, list[ExperimentResult]] = {}
         bus.on(EXPERIMENT_RESULT, self._on_experiment_result)
         bus.on(HYPOTHESIS_EXPERIMENTS_READY, self._on_experiments_ready)
@@ -119,11 +121,25 @@ class SemanticOracle:
         diffs = []
 
         for mut in mutations:
+            # Calcul du Z-score comportemental si le modèle est disponible
+            # (connecte le behavioral profiling de ApplicationModel à l'oracle)
+            zscore: float | None = None
+            if self._model_accessor is not None:
+                try:
+                    model = self._model_accessor()
+                    if model is not None and hasattr(model, "get_response_zscore"):
+                        from hdwp.core.model.url_utils import normalize_url_path
+                        path_pat = normalize_url_path(baseline.request_sent.url)
+                        zscore = model.get_response_zscore(path_pat, mut.response_received.body)
+                except Exception:
+                    pass
+
             diff = compute_semantic_diff(
                 baseline.response_received,
                 mut.response_received,
                 baseline.id,
                 mut.id,
+                response_zscore=zscore,
             )
             diffs.append(diff)
             await self._bus.emit(DIFF_COMPUTED, diff.model_dump(), source="semantic_oracle")
@@ -162,13 +178,18 @@ class SemanticOracle:
         behavioral_spec = compute_behavioral_specificity(
             mutation_type, diffs[0], mutations[0], assessments[0]
         )
+        # n_experiments_done / n_required : compter mutations ET replays ensemble.
+        # Ainsi : 1 mutation sans replay → coverage < 1.0 (preuve insuffisante)
+        #          1 mutation + 1 replay → coverage = 1.0 (reproductibilité vérifiée)
+        # Évite que experiment_coverage = n/n = 1.0 avec une seule expérience sans replay.
+        all_experiments_count = len(mutations) + len(replays)
         score = compute_confidence(
             assessment=assessments[0],
             reproducibility=reproducibility,
             observation_quality=obs_quality,
             behavioral_specificity=behavioral_spec,
-            n_experiments_done=len(mutations),
-            n_experiments_required=max(1, len(mutations)),
+            n_experiments_done=all_experiments_count,
+            n_experiments_required=max(2, all_experiments_count),
         )
 
         all_refuted = all(a.verdict == ViolationVerdict.REFUTED for a in assessments)

@@ -86,6 +86,8 @@ class ApplicationModel:
         self._auth_notified: set[str] = set()
 
         self._confidence_weights: dict[str, float] = {"ep": 0.4, "role": 0.4, "bola": 0.2}
+        # Behavioral profiling: track response size distribution per endpoint for Z-score anomaly detection
+        self._behavioral_profiles: dict[str, dict] = {}
 
         bus.on(OBSERVATION_RAW, self._on_observation)
         bus.on(FINDING_REFUTED, self._on_finding_refuted)
@@ -105,8 +107,11 @@ class ApplicationModel:
 
         self._store_in_corpus(obs)
 
-        # Flow map: track referrer edges and count observations
+        # Behavioral profiling — update response size distribution for Z-score detection
         _current_path = self._normalize_path(obs.request.url)
+        self._update_behavioral_profile(_current_path, obs.response.body if obs.response else None)
+
+        # Flow map: track referrer edges and count observations
         self._flow_builder.add_observation(obs, _current_path)
         self._obs_count += 1
 
@@ -488,6 +493,28 @@ class ApplicationModel:
                 elif value.startswith("http") and value.startswith(base):
                     links.append(value)
         return links
+
+    def _update_behavioral_profile(self, path_pattern: str, response_body: object) -> None:
+        """Track response size distribution for Z-score anomaly detection."""
+        import math
+        size = len(str(response_body)) if response_body is not None else 0
+        profile = self._behavioral_profiles.setdefault(path_pattern, {"sizes": [], "mean": 0.0, "std": 1.0})
+        profile["sizes"].append(size)
+        sizes = profile["sizes"][-50:]  # rolling window of 50 observations
+        profile["sizes"] = sizes
+        if len(sizes) >= 3:
+            mean = sum(sizes) / len(sizes)
+            variance = sum((s - mean) ** 2 for s in sizes) / len(sizes)
+            profile["mean"] = mean
+            profile["std"] = max(math.sqrt(variance), 1.0)
+
+    def get_response_zscore(self, path_pattern: str, response_body: object) -> float | None:
+        """Return Z-score of response size vs historical distribution. None if < 5 observations."""
+        profile = self._behavioral_profiles.get(path_pattern)
+        if not profile or len(profile.get("sizes", [])) < 5:
+            return None
+        size = len(str(response_body)) if response_body is not None else 0
+        return (size - profile["mean"]) / profile["std"]
 
     def get_corpus_for_path(self, path_pattern: str) -> list[tuple[str, NormalizedRequest]]:
         """Return observed requests for a given path pattern."""

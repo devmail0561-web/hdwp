@@ -67,6 +67,7 @@ hdwp = "hdwp.cli.main:app"
 "core.authorization.method_override" = "hdwp.plugins.core.authorization.method_override:MethodOverridePlugin"
 "core.temporal.session_replay" = "hdwp.plugins.core.temporal.session_replay:SessionReplayPlugin"
 # Nouveaux plugins — CWEs non couverts
+"core.injection.anomaly_probing" = "hdwp.plugins.core.injection.anomaly_probing:AnomalyProbingPlugin"
 "core.injection.xxe" = "hdwp.plugins.core.injection.xxe:XXEPlugin"
 "core.injection.graphql" = "hdwp.plugins.core.injection.graphql:GraphQLPlugin"
 "core.injection.crlf" = "hdwp.plugins.core.injection.crlf_injection:CRLFPlugin"

@@ -101,7 +101,7 @@ class NoSQLiPlugin(HDWPPlugin):
                     },
                     description=f"NoSQLi test: {param.name}={str(payload)[:30]}",
                 )
-                for payload in NOSQLI_PAYLOADS[:3]
+                for payload in NOSQLI_PAYLOADS
             ]
             hypotheses.append(
                 Hypothesis(

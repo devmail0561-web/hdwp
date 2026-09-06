@@ -215,6 +215,11 @@ class SemanticDiff(BaseModel):
     status_difference: bool = False
     body_similarity: float = 0.0
     data_identity_score: float | None = None  # 1.0=same user data, 0.0=different data, None=undetermined
+    # Anomaly detection fields (unknown vulnerability indicators)
+    response_size_ratio: float | None = None   # exp_size/base_size — >2.0 = potential data extraction
+    response_zscore: float | None = None       # Z-score vs historical endpoint baseline — |z|>2.5 = anomaly
+    suspicious_fields: list[str] = Field(default_factory=list)  # high-entropy/sensitive fields in exp
+    security_headers_delta: dict[str, str] = Field(default_factory=dict)  # {header: "added"|"removed"}
     verdict: DiffVerdict = DiffVerdict.INSIGNIFICANT
     verdict_rationale: str = ""
 
