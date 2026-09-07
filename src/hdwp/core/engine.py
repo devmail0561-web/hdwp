@@ -253,6 +253,17 @@ class HDWPEngine:
             tuning=tuning,
         )
         oracle.invariant_store = invariant_store
+
+        # V3 CrossRoleDiffEngine: multi-role response comparison
+        from hdwp.core.oracle.crossrole_diff import CrossRoleDiffEngine
+
+        CrossRoleDiffEngine(bus, model_accessor=app_model.snapshot)
+
+        # V3 TemporalAnomalyDetector: blind injection timing detection
+        from hdwp.core.oracle.temporal_detector import TemporalAnomalyDetector
+
+        TemporalAnomalyDetector(bus)
+
         PassiveFindingEngine(bus, repository)
         report_engine = ReportEngine(bus, repository)
 

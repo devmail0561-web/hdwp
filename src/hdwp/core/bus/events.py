@@ -45,6 +45,8 @@ TECH_STACK_UPDATED = "tech_stack.updated"
 # ── V3 event types ───────────────────────────────────────────────────────────
 THREAT_MODEL_UPDATED = "threat.model.updated"
 INVARIANT_VIOLATED = "invariant.violated"
+CROSSROLE_DIFF_CONFIRMED = "crossrole.diff.confirmed"
+TEMPORAL_ANOMALY_DETECTED = "temporal.anomaly.detected"
 
 ALL_EVENT_TYPES = [
     OBSERVATION_RAW,
@@ -70,6 +72,8 @@ ALL_EVENT_TYPES = [
     TECH_STACK_UPDATED,
     THREAT_MODEL_UPDATED,
     INVARIANT_VIOLATED,
+    CROSSROLE_DIFF_CONFIRMED,
+    TEMPORAL_ANOMALY_DETECTED,
 ]
 
 

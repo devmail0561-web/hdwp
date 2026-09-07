@@ -2,19 +2,17 @@
 # Licensed under the MIT License. See LICENSE file for details.
 
 """
-Operational definitions for the 5-dimensional confidence model.
+Confidence model — V1 (5D linear) + V2 (10D logistic).
 
-observation_quality:
-    Reflects how well-observed the related endpoints were before the experiment.
-    Formula: min(1.0, log(1 + n_obs_for_endpoint) / log(6))
-    Saturates at 5 observations.
-
-behavioral_specificity:
-    Reflects how specific the observed diff is to the property being violated.
+V1 is preserved for backward compatibility and as fallback.
+V2 adds 5 dimensions: temporal_signal, crossrole_signal, invariant_violated,
+waf_bypass_success, causal_depth. ADR-NEW-004: weights only updated after
+manual validation — no unsupervised auto-update.
 """
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 
 from hdwp.core.model.schemas import ConfidenceScore, ExperimentResult, SemanticDiff
 from hdwp.core.oracle.violation_oracle import ViolationAssessment, ViolationVerdict
@@ -158,3 +156,81 @@ def compute_confidence(
         experiment_coverage=round(coverage, 4),
         overall=round(overall, 4),
     )
+
+
+# ── V2 Confidence Model (10D logistic) ──────────────────────────────────────
+
+V2_DIMENSIONS = [
+    "oracle_strength",
+    "reproducibility",
+    "observation_quality",
+    "behavioral_specificity",
+    "experiment_coverage",
+    "temporal_signal",
+    "crossrole_signal",
+    "invariant_violated",
+    "waf_bypass_success",
+    "causal_depth",
+]
+
+V2_DEFAULT_WEIGHTS = {
+    "oracle_strength": 1.8,
+    "reproducibility": 2.2,
+    "observation_quality": 0.8,
+    "behavioral_specificity": 1.0,
+    "experiment_coverage": 0.7,
+    "temporal_signal": 1.5,
+    "crossrole_signal": 1.8,
+    "invariant_violated": 2.5,
+    "waf_bypass_success": 0.6,
+    "causal_depth": 1.2,
+}
+
+V2_DEFAULT_BIAS = -4.0
+
+
+def _sigmoid(x: float) -> float:
+    if x >= 0:
+        return 1.0 / (1.0 + math.exp(-x))
+    ex = math.exp(x)
+    return ex / (1.0 + ex)
+
+
+@dataclass
+class ConfidenceModelV2:
+    weights: dict[str, float] = field(default_factory=lambda: dict(V2_DEFAULT_WEIGHTS))
+    bias: float = V2_DEFAULT_BIAS
+
+    def predict(self, features: dict[str, float]) -> float:
+        z = self.bias
+        for dim in V2_DIMENSIONS:
+            z += self.weights.get(dim, 0.0) * features.get(dim, 0.0)
+        return round(_sigmoid(z), 4)
+
+    def compute_v2(
+        self,
+        v1_score: ConfidenceScore,
+        temporal_signal: float = 0.0,
+        crossrole_signal: float = 0.0,
+        invariant_violated: float = 0.0,
+        waf_bypass_success: float = 0.0,
+        causal_depth: float = 0.0,
+    ) -> float:
+        features = {
+            "oracle_strength": v1_score.oracle_strength,
+            "reproducibility": v1_score.reproducibility,
+            "observation_quality": v1_score.observation_quality,
+            "behavioral_specificity": v1_score.behavioral_specificity,
+            "experiment_coverage": v1_score.experiment_coverage,
+            "temporal_signal": temporal_signal,
+            "crossrole_signal": crossrole_signal,
+            "invariant_violated": invariant_violated,
+            "waf_bypass_success": waf_bypass_success,
+            "causal_depth": causal_depth,
+        }
+        return self.predict(features)
+
+    def update_weights(self, new_weights: dict[str, float]) -> None:
+        for dim in V2_DIMENSIONS:
+            if dim in new_weights:
+                self.weights[dim] = new_weights[dim]
