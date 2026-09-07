@@ -17,6 +17,12 @@ class CustomBuildHook(BuildHookInterface):
         if not (app_dir / "package.json").exists():
             return
 
+        # Skip rebuild if dist is already present (e.g. wheel built from sdist)
+        if (app_dir / "dist" / "index.html").exists():
+            build_data.setdefault("artifacts", [])
+            build_data["artifacts"].append("src/hdwp/app/dist/")
+            return
+
         if not (app_dir / "node_modules").exists():
             subprocess.run(["npm", "ci", "--silent"], cwd=app_dir, check=True)
 
