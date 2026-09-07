@@ -1,4 +1,4 @@
-# HDWP v2 — Analyse Critique et Architecture Cible
+# HDWP v3 — Analyse Critique et Architecture Cible
 
 > Auteur : analyse structurelle du moteur v1 et proposition d'architecture v2
 > Statut : document de conception — Michel Tendeng
@@ -231,7 +231,7 @@ les findings pour progresser vers l'objectif.
 
 ---
 
-## Partie III — Architecture HDWP v2
+## Partie III — Architecture HDWP v3
 
 ### 3.1 Vue d'ensemble
 
@@ -600,7 +600,7 @@ class WAFDialogEngine:
 
 ---
 
-### 3.6 SemanticOracle v2 — vérité sémantique réelle
+### 3.6 SemanticOracle v3 — vérité sémantique réelle
 
 **Fichier** : `core/oracle/engine.py` (modifié en profondeur)
 
@@ -646,7 +646,7 @@ class TemporalAnomalyDetector:
     """
 ```
 
-#### ConfidenceModel v2 — apprenant
+#### ConfidenceModel v3 — apprenant
 
 Le modèle de confiance v1 est linéaire fixe. Le v2 est un **modèle logistique
 calibré par l'historique des findings** dans la `KnowledgeBase v2`.
@@ -797,13 +797,13 @@ AttackGraphPlanner.update_state(finding)
 
 ---
 
-### 3.8 KnowledgeBase v2 — mémoire structurelle
+### 3.8 KnowledgeBase v3 — mémoire structurelle
 
 **Fichier** : `core/knowledge/base.py` (refonte)
 
 #### Données supplémentaires stockées
 
-| Table | Contenu v1 | Ajout v2 |
+| Table | Contenu v1 | Ajout v3 |
 |---|---|---|
 | `session_meta` | URL, type, date, n_findings | + `attack_graph_snapshot`, `goal_reached`, `final_state` |
 | `pattern_stats` | taux par (property, mutation, target_type) | + `stack_signature` (hash structurel du tech_stack) |
@@ -853,7 +853,7 @@ Utilisé par l'`AttackGraphPlanner` pour pondérer les transitions connues.
 
 ---
 
-### 3.9 ApplicationModel v2 — enrichi
+### 3.9 ApplicationModel v3 — enrichi
 
 **Fichier** : `core/model/application_model.py` (modifié)
 
@@ -894,7 +894,7 @@ class InvariantStore:
 
 ```python
 @dataclass
-class ParameterNode:  # v2
+class ParameterNode:  # v3
     name: str
     location: ParameterLocation
     observed_values: List[Any]
@@ -918,7 +918,7 @@ class ParameterNode:  # v2
 La contrainte ADR-002 (le LLM ne peut jamais retourner CONFIRMED seul) est maintenue
 et étendue.
 
-Nouveaux rôles du LLM dans v2 :
+Nouveaux rôles du LLM dans v3 :
 
 | Rôle | Input | Output | Contrainte |
 |---|---|---|---|
@@ -934,7 +934,7 @@ l'état du moteur sans passer par un validateur déterministe.
 
 ---
 
-### 3.11 Flux de données complet v2
+### 3.11 Flux de données complet v3
 
 ```
 [Cible HTTP]
@@ -1022,13 +1022,13 @@ KnowledgeBase v2.record()
 
 ---
 
-### 3.12 Schéma des dépendances d'initialisation v2
+### 3.12 Schéma des dépendances d'initialisation v3
 
 ```python
-# HDWPEngine.create() v2
+# HDWPEngine.create() v3
 
-KnowledgeBase v2
-  ├─▶ ConfidenceModel v2    (poids chargés)
+KnowledgeBase v3
+  ├─▶ ConfidenceModel v3    (poids chargés)
   ├─▶ HypothesisPrioritizer (poids adaptés — conservé)
   ├─▶ InvariantStore        (invariants persistés rechargés)
   └─▶ StructuralIndex       (index inter-sessions chargé)
@@ -1045,7 +1045,7 @@ ReasoningLayer
 
 LLMLayer (optionnel, inchangé dans ses dépendances)
   ├─▶ ContextualHypothesisEngine
-  ├─▶ SemanticOracle v2
+  ├─▶ SemanticOracle v3
   └─▶ ObservationEngine
 
 PluginRegistry (conservé)
@@ -1068,9 +1068,9 @@ TuningConfig YAML (conservé, override final)
 
 ---
 
-## Partie IV — Matrice de décision : v1 vs v2
+## Partie IV — Matrice de décision : v2 vs v3
 
-| Capacité | v1 | v2 |
+| Capacité | v2 | v3 |
 |---|---|---|
 | Détection de vulnérabilités isolées | ✅ Pattern matching | ✅ Conservé + inférence causale |
 | Prioritisation des endpoints | Heuristique H/M/L | Score causal continu (ThreatModelEngine) |
@@ -1099,7 +1099,7 @@ impact/effort.
 
 **Objectif** : avoir un moteur qui sait ce qui compte sur la cible avant de tester.
 
-1. `DataFlowGraph` dans `ApplicationModel v2`
+1. `DataFlowGraph` dans `ApplicationModel v3`
    — dépend de : `ResponseCorpus` (déjà stocké), `ParameterModel` (déjà existant)
    — débloque : `CausalInferenceEngine`, `ThreatModelEngine`
 
@@ -1107,13 +1107,13 @@ impact/effort.
    — dépend de : `DataFlowGraph`
    — débloque : prioritisation causale, StrategySelector
 
-3. `InvariantStore` dans `ApplicationModel v2`
+3. `InvariantStore` dans `ApplicationModel v3`
    — dépend de : `observation.raw` (déjà produit)
    — débloque : inférence sans règles, signal haute confiance
 
 ### Sprint 2 — Oracle enrichi (4–6 semaines)
 
-**Objectif** : détecter ce que v1 manque avec les données déjà collectées.
+**Objectif** : détecter ce que v2 manque avec les données déjà collectées.
 
 4. `CrossRoleDiffEngine`
    — dépend de : `ResponseCorpus` (déjà stocké), `AssetRegistry`
@@ -1167,7 +1167,7 @@ impact/effort.
 
 ## Annexe — ADRs impactés
 
-| ADR | Décision originale | Impact v2 |
+| ADR | Décision originale | Impact v3 |
 |---|---|---|
 | ADR-002 | LLM ne peut jamais retourner CONFIRMED seul | Maintenu et étendu : LLM reste consultatif dans tous les nouveaux rôles |
 | ADR-NEW-001 | `InvariantViolation` peut déclencher un finding haute confiance sans LLM | L'`InvariantStore` est un oracle déterministe, pas probabiliste |

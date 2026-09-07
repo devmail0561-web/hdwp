@@ -101,6 +101,19 @@ class LLMLayerProtocol(ABC):
         """
         ...
 
+    @abstractmethod
+    async def propose_invariants(
+        self,
+        model: ApplicationModelData,
+        response_corpus: dict[str, dict[str, list[dict]]],
+    ) -> list[str]:
+        """
+        V3: Propose des invariants candidats depuis le modèle et le corpus de réponses.
+        Les propositions sont soumises à InvariantStore pour validation déterministe (ADR-002).
+        Retourne une liste d'énoncés formels. Retourne [] en cas d'erreur.
+        """
+        ...
+
 
 class AnthropicLLMLayer(LLMLayerProtocol):
     """Implémentation Anthropic de la couche LLM."""
@@ -283,6 +296,38 @@ class AnthropicLLMLayer(LLMLayerProtocol):
             log.warning("llm.exploit_context_failed", error=str(exc))
         return {"explanation": finding.remediation_hint, "alternative_payloads": []}
 
+    async def propose_invariants(
+        self,
+        model: ApplicationModelData,
+        response_corpus: dict[str, dict[str, list[dict]]],
+    ) -> list[str]:
+        endpoints_summary = [f"{ep.path} [{', '.join(ep.methods)}] roles={ep.roles_observed}" for ep in model.endpoints[:8]]
+        corpus_sample = {k: list(v.keys()) for k, v in list(response_corpus.items())[:5]}
+        prompt = (
+            "Tu es un expert en sécurité applicative. "
+            "Analyse le modèle et propose des invariants de sécurité.\n\n"
+            f"Endpoints : {endpoints_summary}\n"
+            f"Rôles : {[r.name for r in model.roles]}\n"
+            f"Corpus de réponses (endpoint → rôles) : {corpus_sample}\n\n"
+            "Propose 3-5 invariants formels, un par ligne. Format :\n"
+            "- owner_id in response == authenticated_user_id for /api/resource/{id}\n"
+            "- status_code == 403 for anonymous on /api/admin/*\n"
+            "- field 'balance' absent for role 'user' on /api/accounts/{id}\n\n"
+            "Uniquement des invariants vérifiables automatiquement. "
+            "ADR-002 : ces propositions seront validées par un oracle déterministe."
+        )
+        try:
+            resp = await self._client.messages.create(
+                model=self._model,
+                max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            lines = resp.content[0].text.strip().split("\n")
+            return [ln.lstrip("- ").strip() for ln in lines if ln.strip() and not ln.startswith("#")][:5]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.propose_invariants_failed", error=str(exc))
+            return []
+
 
 class OpenAICompatibleLLMLayer(LLMLayerProtocol):
     """
@@ -440,6 +485,32 @@ class OpenAICompatibleLLMLayer(LLMLayerProtocol):
         except Exception as exc:  # noqa: BLE001
             log.warning("llm.exploit_context_failed", error=str(exc))
         return {"explanation": finding.remediation_hint, "alternative_payloads": []}
+
+    async def propose_invariants(
+        self,
+        model: ApplicationModelData,
+        response_corpus: dict[str, dict[str, list[dict]]],
+    ) -> list[str]:
+        endpoints_summary = [f"{ep.path} [{', '.join(ep.methods)}] roles={ep.roles_observed}" for ep in model.endpoints[:8]]
+        corpus_sample = {k: list(v.keys()) for k, v in list(response_corpus.items())[:5]}
+        prompt = (
+            "Analyse le modèle et propose des invariants de sécurité.\n\n"
+            f"Endpoints : {endpoints_summary}\n"
+            f"Rôles : {[r.name for r in model.roles]}\n"
+            f"Corpus : {corpus_sample}\n\n"
+            "Propose 3-5 invariants formels, un par ligne (format: condition for context). "
+            "ADR-002 : propositions validées par oracle déterministe."
+        )
+        try:
+            resp = await self._client.chat.completions.create(
+                model=self._model, max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            lines = (resp.choices[0].message.content or "").strip().split("\n")
+            return [ln.lstrip("- ").strip() for ln in lines if ln.strip() and not ln.startswith("#")][:5]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.propose_invariants_failed", error=str(exc))
+            return []
 
 
 def _build_disambiguation_prompt(

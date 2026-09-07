@@ -283,10 +283,18 @@ class Finding(BaseModel):
 
 # ── Flow Map schemas ─────────────────────────────────────────────────────────
 
+class FlowEdgeType(str, Enum):
+    PRODUCES = "PRODUCES"
+    CONSUMES = "CONSUMES"
+    TRANSFORMS = "TRANSFORMS"
+    LEAKS = "LEAKS"
+
+
 class FlowEdge(BaseModel):
     from_endpoint: str
     to_endpoint: str
     trigger: Literal["link", "form", "ajax", "fsm", "redirect"] = "link"
+    edge_type: FlowEdgeType = FlowEdgeType.PRODUCES
     params_transferred: list[str] = Field(default_factory=list)
     confidence: float = 0.5
 

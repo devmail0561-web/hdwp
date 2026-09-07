@@ -4,10 +4,18 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from hdwp.core.model.schemas import ApplicationModelData, DataFlowMap, FlowEdge, RawObservation
+    from hdwp.core.model.schemas import (
+        ApplicationModelData,
+        DataFlowMap,
+        EndpointNode,
+        FlowEdge,
+        ParameterNode,
+        RawObservation,
+    )
 
 
 _SENSITIVE_FIELDS = frozenset({
@@ -21,6 +29,10 @@ def _to_snake(name: str) -> str:
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
     s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
     return s.lower().replace("-", "_").replace(" ", "_")
+
+
+def _normalize_field(name: str) -> str:
+    return _to_snake(name).rstrip("_id").rstrip("_ids")
 
 
 class FlowMapBuilder:
@@ -47,10 +59,13 @@ class FlowMapBuilder:
         return False
 
     def build(self, model: ApplicationModelData) -> DataFlowMap:
-        from hdwp.core.model.schemas import DataFlowMap, FlowEdge
+        from hdwp.core.model.schemas import DataFlowMap, FlowEdge, FlowEdgeType
 
         edges: list[FlowEdge] = []
         seen: set[tuple[str, str]] = set()
+
+        ep_response_fields = _build_response_field_index(model)
+        ep_request_params = _build_request_param_index(model)
 
         # Edges from referrer chain
         max_count = max(self._edge_counts.values(), default=1)
@@ -58,8 +73,10 @@ class FlowMapBuilder:
             pair = (frm, to)
             if pair not in seen:
                 seen.add(pair)
+                edge_type = _classify_edge(frm, to, ep_response_fields, ep_request_params)
                 edges.append(FlowEdge(
                     from_endpoint=frm, to_endpoint=to, trigger=trigger,
+                    edge_type=edge_type,
                     confidence=round(min(0.95, count / max_count), 3),
                 ))
 
@@ -77,14 +94,21 @@ class FlowMapBuilder:
                     pair = (frm, to)
                     if pair not in seen:
                         seen.add(pair)
+                        edge_type = _classify_edge(frm, to, ep_response_fields, ep_request_params)
                         edges.append(FlowEdge(
                             from_endpoint=frm, to_endpoint=to,
                             trigger="fsm",
+                            edge_type=edge_type,
                             confidence=round(model.fsm.confidence, 3),
                         ))
 
         # Add params transferred
-        edges = _add_params_transferred(edges, model)
+        edges = _add_params_transferred(edges, ep_response_fields, ep_request_params)
+
+        # Discover implicit data-flow edges not captured by referrer/FSM
+        edges = _add_implicit_dataflow_edges(
+            edges, seen, model, ep_response_fields, ep_request_params,
+        )
 
         # DB inference
         from hdwp.core.model.db_inferrer import DBInferrer
@@ -100,11 +124,23 @@ class FlowMapBuilder:
             last_updated=model.last_updated,
         )
 
+    def centrality_score(self, endpoint_id: str, flow_map: DataFlowMap) -> float:
+        in_degree = 0
+        out_degree = 0
+        for edge in flow_map.edges:
+            if edge.to_endpoint == endpoint_id:
+                in_degree += 1
+            if edge.from_endpoint == endpoint_id:
+                out_degree += 1
+        total_endpoints = len({e.from_endpoint for e in flow_map.edges} | {e.to_endpoint for e in flow_map.edges})
+        if total_endpoints <= 1:
+            return 0.0
+        return round((in_degree + out_degree) / (total_endpoints - 1), 4)
 
-def _add_params_transferred(
-    edges: list[FlowEdge], model: ApplicationModelData
-) -> list[FlowEdge]:
-    """For each edge A→B, find params whose normalized name overlaps with A's response fields."""
+
+def _build_response_field_index(
+    model: ApplicationModelData,
+) -> dict[str, set[str]]:
     ep_response_fields: dict[str, set[str]] = {}
     for obj in model.objects:
         for ep in model.endpoints:
@@ -113,25 +149,119 @@ def _add_params_transferred(
                 fields = ep_response_fields.setdefault(ep.path, set())
                 for f in obj.schema_def:
                     fields.add(_to_snake(f))
+    return ep_response_fields
 
+
+def _build_request_param_index(
+    model: ApplicationModelData,
+) -> dict[str, set[str]]:
     ep_request_params: dict[str, set[str]] = {}
     for ep in model.endpoints:
         params = {_to_snake(p.name) for p in model.parameters if p.id in ep.parameters}
         if params:
             ep_request_params[ep.path] = params
+    return ep_request_params
 
+
+def _classify_edge(
+    from_ep: str,
+    to_ep: str,
+    ep_response_fields: dict[str, set[str]],
+    ep_request_params: dict[str, set[str]],
+) -> FlowEdgeType:
+    from hdwp.core.model.schemas import FlowEdgeType
+
+    a_fields = ep_response_fields.get(from_ep, set())
+    b_params = ep_request_params.get(to_ep, set())
+
+    a_normalized = {_normalize_field(f) for f in a_fields}
+    b_normalized = {_normalize_field(p) for p in b_params}
+
+    overlap = a_normalized & b_normalized
+
+    if not overlap:
+        return FlowEdgeType.PRODUCES
+
+    has_sensitive = any(f in _SENSITIVE_FIELDS for f in overlap)
+    b_fields = ep_response_fields.get(to_ep, set())
+    b_out_normalized = {_normalize_field(f) for f in b_fields}
+
+    if has_sensitive and not b_out_normalized:
+        return FlowEdgeType.LEAKS
+
+    if overlap & b_out_normalized:
+        return FlowEdgeType.TRANSFORMS
+
+    return FlowEdgeType.CONSUMES
+
+
+def _add_params_transferred(
+    edges: list[FlowEdge],
+    ep_response_fields: dict[str, set[str]],
+    ep_request_params: dict[str, set[str]],
+) -> list[FlowEdge]:
     for edge in edges:
         a_fields = ep_response_fields.get(edge.from_endpoint, set())
         b_params = ep_request_params.get(edge.to_endpoint, set())
-        transferred = sorted(a_fields & b_params)
+
+        a_normalized = {_normalize_field(f): f for f in a_fields}
+        b_normalized = {_normalize_field(p): p for p in b_params}
+
+        overlap_keys = set(a_normalized.keys()) & set(b_normalized.keys())
+        transferred = sorted(b_normalized[k] for k in overlap_keys)
         if transferred:
             edge.params_transferred = transferred
 
     return edges
 
 
+def _add_implicit_dataflow_edges(
+    edges: list[FlowEdge],
+    seen: set[tuple[str, str]],
+    model: ApplicationModelData,
+    ep_response_fields: dict[str, set[str]],
+    ep_request_params: dict[str, set[str]],
+) -> list[FlowEdge]:
+    from hdwp.core.model.schemas import FlowEdge, FlowEdgeType
+
+    for ep_a in model.endpoints:
+        a_fields = ep_response_fields.get(ep_a.path, set())
+        if not a_fields:
+            continue
+        a_normalized = {_normalize_field(f) for f in a_fields}
+
+        for ep_b in model.endpoints:
+            if ep_a.path == ep_b.path:
+                continue
+            pair = (ep_a.path, ep_b.path)
+            if pair in seen:
+                continue
+
+            b_params = ep_request_params.get(ep_b.path, set())
+            if not b_params:
+                continue
+            b_normalized = {_normalize_field(p) for p in b_params}
+
+            overlap = a_normalized & b_normalized
+            if len(overlap) < 1:
+                continue
+
+            seen.add(pair)
+            edge_type = _classify_edge(ep_a.path, ep_b.path, ep_response_fields, ep_request_params)
+            transferred = sorted(overlap)
+            edges.append(FlowEdge(
+                from_endpoint=ep_a.path,
+                to_endpoint=ep_b.path,
+                trigger="ajax",
+                edge_type=edge_type,
+                params_transferred=transferred,
+                confidence=round(min(0.7, len(overlap) * 0.15), 3),
+            ))
+
+    return edges
+
+
 def _detect_exfiltration(model: ApplicationModelData) -> list[str]:
-    """Find endpoints that expose sensitive data fields without requiring authentication."""
     risks: list[str] = []
     ep_objects: dict[str, list] = {ep.path: [] for ep in model.endpoints}
     for obj in model.objects:

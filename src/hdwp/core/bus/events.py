@@ -42,6 +42,9 @@ HYPOTHESIS_AMBIGUOUS = "hypothesis.ambiguous"
 # Emis par ApplicationModel quand un nouveau tag framework:/db:/cms: est détecté.
 # Payload : {"tag": str}  ex: {"tag": "framework:laravel"}
 TECH_STACK_UPDATED = "tech_stack.updated"
+# ── V3 event types ───────────────────────────────────────────────────────────
+THREAT_MODEL_UPDATED = "threat.model.updated"
+INVARIANT_VIOLATED = "invariant.violated"
 
 ALL_EVENT_TYPES = [
     OBSERVATION_RAW,
@@ -65,6 +68,8 @@ ALL_EVENT_TYPES = [
     FINDINGS_CORRELATED,
     HYPOTHESIS_AMBIGUOUS,
     TECH_STACK_UPDATED,
+    THREAT_MODEL_UPDATED,
+    INVARIANT_VIOLATED,
 ]
 
 

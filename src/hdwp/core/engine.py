@@ -150,6 +150,11 @@ class HDWPEngine:
 
         app_model = ApplicationModel(bus)
 
+        # V3 InvariantStore: inductive invariant learning
+        from hdwp.core.model.invariant_store import InvariantStore
+
+        invariant_store = InvariantStore(bus)
+
         # Plugin registry
         registry = PluginRegistry()
         registry.discover()
@@ -221,6 +226,15 @@ class HDWPEngine:
                 ) / new_total
             prev["total"] = new_total
 
+        # V3 ThreatModelEngine: dynamic threat scoring per endpoint
+        from hdwp.core.threat.engine import ThreatModelEngine
+
+        threat_engine = ThreatModelEngine(
+            bus=bus,
+            model_accessor=app_model.snapshot,
+            flow_map_accessor=app_model.get_flow_map,
+        )
+
         from hdwp.core.property_engine.inference_registry import InferenceRegistry
 
         inference_reg = InferenceRegistry.default_with_kb_stats(kb_stats)
@@ -238,6 +252,7 @@ class HDWPEngine:
             model_accessor=app_model.snapshot,
             tuning=tuning,
         )
+        oracle.invariant_store = invariant_store
         PassiveFindingEngine(bus, repository)
         report_engine = ReportEngine(bus, repository)
 
