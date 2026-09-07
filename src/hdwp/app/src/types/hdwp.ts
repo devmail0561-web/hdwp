@@ -5,6 +5,15 @@ export interface BusEvent {
   payload: Record<string, unknown>
 }
 
+export interface ConfidenceBreakdown {
+  oracle_strength: number
+  reproducibility: number
+  observation_quality: number
+  behavioral_specificity: number
+  experiment_coverage: number
+  overall: number
+}
+
 export interface Finding {
   id: string
   hypothesis_id: string
@@ -16,6 +25,8 @@ export interface Finding {
   cwe_id: string
   affected_endpoints: string[]
   remediation_hint: string
+  confidence_breakdown?: ConfidenceBreakdown
+  proof?: Record<string, unknown>
 }
 
 export interface PayloadFinding extends Finding {
@@ -57,6 +68,9 @@ export interface StateResponse {
   experiment_count: number
   proxy_active: boolean
   error_message: string
+  tech_stack: string[]
+  detected_versions: Record<string, string>
+  detected_content_types: string[]
 }
 
 export interface LLMStatus {
@@ -79,12 +93,29 @@ export interface Plugin {
   data_access: string
 }
 
+export interface BehavioralProfile {
+  mean: number
+  std: number
+  sample_count: number
+  max_zscore_seen: number | null
+}
+
 export interface EndpointNode {
   id: string
   path: string
   methods: string[]
   auth_required: boolean
   roles_observed: string[]
+  // Champs enrichis (peuplés après observation)
+  behavioral_profile?: BehavioralProfile
+  status_by_role?: Record<string, number>
+  contains_privilege_field?: boolean
+  observed_roles?: string[]
+  jwt_field_names?: string[]
+  error_tech_signals?: string[]
+  detected_waf?: string | null
+  returns?: string[]
+  response_content_type?: string | null
 }
 
 export interface LLMModelsResponse {

@@ -507,6 +507,24 @@ class ActiveCrawler:
                                 queue.append((api_url, depth + 1, queue_method, current_pattern))
                         if not api_endpoints and self._llm_layer is not None:
                             await self._llm_enrich(inline_src, url, visited, queue)
+                        # Analyser les sinks DOM dangereux dans les scripts inline
+                        from hdwp.core.observation.js_extractor import extract_dom_sinks
+                        sinks = extract_dom_sinks(inline_src)
+                        for sink in sinks:
+                            await self._bus.emit(
+                                "observation.raw",
+                                {
+                                    "request": {"method": "GET", "url": url, "headers": {}, "body": None},
+                                    "response": {"status_code": 200, "headers": {}, "body": None},
+                                    "tags": [
+                                        f"dom_sink:{sink.sink_type}",
+                                        "source:inline_script",
+                                        *(["user_controlled_source"] if sink.source_hint else []),
+                                    ],
+                                    "session_id": self._session_id,
+                                },
+                                source="dom_sink_analysis",
+                            )
 
             elif "application/json" in content_type or "text/json" in content_type:
                 # ── Corps JSON : extraire les liens HATEOAS ────────────────

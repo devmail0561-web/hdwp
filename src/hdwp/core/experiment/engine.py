@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -97,21 +98,29 @@ class ExperimentEngine:
             # Céder le contrôle pour que les tâches HIGH déjà créées démarrent
             # et acquièrent le semaphore avant d'en créer de nouvelles.
             await asyncio.sleep(0)
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for i, r in enumerate(results):
+            if isinstance(r, BaseException):
+                log.warning("experiment.task_failed", task_index=i, error=str(r))
 
     async def _run_with_semaphore(self, hyp: Hypothesis) -> None:
         async with self._semaphore:
             await self._run_hypothesis(hyp)
 
+    # Profondeur maximale des chaînes de follow-up pour éviter les boucles infinies
+    _MAX_FOLLOWUP_DEPTH = 3
+
     async def _run_hypothesis(self, hyp: Hypothesis) -> None:
+        from hdwp.core.experiment.condition_evaluator import evaluate_trigger
+
         model = self._model_accessor()
         if model is None:
             log.warning("experiment.no_model", hypothesis_id=hyp.id)
             return
 
         corpus = self._corpus_accessor()
-        plans = self._selector.select_for_hypothesis(hyp, model, corpus)
-        if not plans:
+        initial_plans = self._selector.select_for_hypothesis(hyp, model, corpus)
+        if not initial_plans:
             log.warning("experiment.no_plans", hypothesis_id=hyp.id)
             return
 
@@ -119,7 +128,15 @@ class ExperimentEngine:
         experiment_ids: list[str] = []
         self._results_buffer[hyp.id] = []
 
-        for plan in plans:
+        # Utiliser une deque pour supporter les follow-up plans ajoutés dynamiquement.
+        # Chaque élément est (plan, depth) pour respecter MAX_FOLLOWUP_DEPTH.
+        plan_queue: deque[tuple[ConcreteExperimentPlan, int]] = deque(
+            (p, 0) for p in initial_plans
+        )
+
+        while plan_queue:
+            plan, depth = plan_queue.popleft()
+
             # Rôle effectif pour les requêtes mutées selon le type de mutation
             mutation_role = (
                 plan.target_role
@@ -184,6 +201,68 @@ class ExperimentEngine:
             self._results_buffer[hyp.id].append(mutation)
             await self._bus.emit(EXPERIMENT_RESULT, mutation.model_dump(), source="experiment_engine")
 
+            # ── follow-up adaptatif (évalué AVANT le replay) ─────────
+            # Évaluer trigger_condition contre le résultat de mutation brut.
+            # Si déclenché et profondeur < MAX, ajouter les follow-up specs à la queue.
+            if (
+                depth < self._MAX_FOLLOWUP_DEPTH
+                and plan.experiment_spec.trigger_condition is not None
+                and plan.experiment_spec.follow_up_specs
+                and evaluate_trigger(plan.experiment_spec.trigger_condition, mutation)
+            ):
+                for follow_spec in plan.experiment_spec.follow_up_specs:
+                    follow_plans = self._selector.select_for_spec(
+                        follow_spec, hyp, model, corpus
+                    )
+                    for fp in follow_plans:
+                        plan_queue.append((fp, depth + 1))
+                log.debug(
+                    "experiment.followup_triggered",
+                    hypothesis_id=hyp.id,
+                    depth=depth,
+                    n_follow_ups=len(plan.experiment_spec.follow_up_specs),
+                )
+
+            # ── WAF bypass adaptatif ──────────────────────────────────
+            # Si la mutation retourne un 403 et qu'un WAF est connu, générer des
+            # follow-up specs avec encodages adaptés au WAF détecté.
+            if (
+                depth < self._MAX_FOLLOWUP_DEPTH
+                and mutation.response_received is not None
+                and mutation.response_received.status_code in (403, 406)
+                and model is not None
+            ):
+                waf_tags = [t for t in model.tech_stack if t.startswith("waf:")]
+                if waf_tags and "payload" in plan.experiment_spec.mutation_params:
+                    try:
+                        from hdwp.core.experiment.encoding_pipeline import build_bypass_experiment_specs
+                        from hdwp.core.model.schemas import ExperimentSpec
+                        waf_tag = waf_tags[0]
+                        bypass_params_list = build_bypass_experiment_specs(
+                            original_payload=plan.experiment_spec.mutation_params["payload"],
+                            mutation_params=dict(plan.experiment_spec.mutation_params),
+                            waf_tag=waf_tag,
+                            max_strategies=2,
+                        )
+                        for bypass_params in bypass_params_list:
+                            bypass_spec = ExperimentSpec(
+                                mutation_type=plan.experiment_spec.mutation_type,
+                                base_request=plan.experiment_spec.base_request,
+                                mutation_params=bypass_params,
+                                description=f"WAF bypass ({bypass_params.get('_bypass_strategy')}): {waf_tag}",
+                            )
+                            bypass_plans = self._selector.select_for_spec(bypass_spec, hyp, model, corpus)
+                            for bp in bypass_plans:
+                                plan_queue.append((bp, depth + 1))
+                        if bypass_params_list:
+                            log.debug(
+                                "experiment.waf_bypass_queued",
+                                waf=waf_tag,
+                                n_strategies=len(bypass_params_list),
+                            )
+                    except Exception as exc:
+                        log.debug("experiment.waf_bypass_failed", error=str(exc))
+
             # ── replay (reproducibility) ──────────────────────────────
             replay = await self._execute(
                 mutated_req, hyp.id, plan.experiment_spec,
@@ -206,6 +285,9 @@ class ExperimentEngine:
                 },
                 source="experiment_engine",
             )
+        else:
+            log.warning("experiment.all_baselines_invalid", hypothesis_id=hyp.id)
+        self._results_buffer.pop(hyp.id, None)
 
     async def _execute(
         self,

@@ -24,8 +24,15 @@ class HypothesisPrioritizer:
     # Kept as ClassVar for reference; actual weights per-instance are in _impact_weights.
     IMPACT_WEIGHTS: ClassVar[dict[PropertyType, float]] = _DEFAULT_WEIGHTS
 
-    def __init__(self, weights: dict[PropertyType, float] | None = None) -> None:
+    def __init__(
+        self,
+        weights: dict[PropertyType, float] | None = None,
+        high_threshold: float = 0.60,
+        medium_threshold: float = 0.30,
+    ) -> None:
         self._impact_weights: dict[PropertyType, float] = weights or _DEFAULT_WEIGHTS
+        self._high_threshold = high_threshold
+        self._medium_threshold = medium_threshold
 
     def compute_priority(
         self,
@@ -42,9 +49,9 @@ class HypothesisPrioritizer:
         # Floor raised to 0.25 so large APIs (many endpoints) can still reach HIGH priority
         score = impact * max(surface, 0.25) * max(obs_factor, 0.1)
 
-        if score >= 0.6:
+        if score >= self._high_threshold:
             level = "HIGH"
-        elif score >= 0.3:
+        elif score >= self._medium_threshold:
             level = "MEDIUM"
         else:
             level = "LOW"
@@ -56,9 +63,14 @@ class HypothesisPrioritizer:
         return level, rationale
 
     @classmethod
-    def with_weights(cls, weights: dict[str, float]) -> HypothesisPrioritizer:
+    def with_weights(
+        cls,
+        weights: dict[str, float],
+        high_threshold: float = 0.60,
+        medium_threshold: float = 0.30,
+    ) -> HypothesisPrioritizer:
         """Crée un prioritizer avec des poids adaptés par la KnowledgeBase."""
         adapted: dict[PropertyType, float] = {}
         for pt in PropertyType:
             adapted[pt] = weights.get(pt.value, _DEFAULT_WEIGHTS.get(pt, 0.5))
-        return cls(weights=adapted)
+        return cls(weights=adapted, high_threshold=high_threshold, medium_threshold=medium_threshold)

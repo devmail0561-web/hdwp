@@ -141,8 +141,19 @@ class PluginRegistry:
     def list_all(self) -> list[HDWPPlugin]:
         return list(self._plugins.values())
 
-    def list_enabled(self) -> list[HDWPPlugin]:
-        return [p for pid, p in self._plugins.items() if pid in self._enabled]
+    def list_enabled(self, tech_stack: set[str] | None = None) -> list[HDWPPlugin]:
+        """Retourne les plugins activés.
+        Si tech_stack est fourni, filtre les plugins qui requièrent une tech non détectée.
+        """
+        enabled = [p for pid, p in self._plugins.items() if pid in self._enabled]
+        if tech_stack is None:
+            return enabled
+        result = []
+        for p in enabled:
+            required = p.tech_stack_required()
+            if not required or required & tech_stack:
+                result.append(p)
+        return result
 
     def get_by_category(self, category: str) -> list[HDWPPlugin]:
         return [p for p in self._plugins.values() if p.category == category]

@@ -17,6 +17,10 @@ class StateResponse(BaseModel):
     experiment_count: int = 0
     proxy_active: bool = False
     error_message: str = ""
+    # Enrichissement tech stack et versions (pour le frontend)
+    tech_stack: list[str] = []
+    detected_versions: dict[str, str] = {}
+    detected_content_types: list[str] = []
 
 
 class LLMStatusResponse(BaseModel):

@@ -37,8 +37,10 @@ _NAMED_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 _GENERIC_COMMENT = re.compile(r'/\*[!*]?\s*([A-Za-z][A-Za-z0-9.-]{2,})\s+v([0-9]+\.[0-9]+[^\s*]*)')
 
-# Module-level cache: (lib, version) -> list of CVE dicts
-_osv_cache: dict[tuple[str, str], list[dict]] = {}
+# Module-level cache: (lib, version) -> (vulns, cached_at_monotonic)
+# TTL de 3600s : les CVEs ajoutées en cours de session seront détectées au prochain scan
+_OSV_CACHE_TTL = 3600.0
+_osv_cache: dict[tuple[str, str], tuple[list[dict], float]] = {}
 
 
 def _extract_from_cdn_url(url: str) -> tuple[str, str] | None:
@@ -77,9 +79,14 @@ def _severity_from_cvss(score: float) -> str:
 
 
 async def _check_osv_batch(libs: list[tuple[str, str]]) -> dict[tuple[str, str], list[dict]]:
-    uncached = [lv for lv in libs if lv not in _osv_cache]
+    import time
+    now = time.monotonic()
+    uncached = [
+        lv for lv in libs
+        if lv not in _osv_cache or (now - _osv_cache[lv][1]) > _OSV_CACHE_TTL
+    ]
     if not uncached:
-        return {lv: _osv_cache[lv] for lv in libs}
+        return {lv: _osv_cache[lv][0] for lv in libs}
 
     queries = [
         {"package": {"name": lib, "ecosystem": "npm"}, "version": ver}
@@ -97,13 +104,13 @@ async def _check_osv_batch(libs: list[tuple[str, str]]) -> dict[tuple[str, str],
             results = data.get("results", [])
             for i, (lib, ver) in enumerate(uncached):
                 vulns = results[i].get("vulns", []) if i < len(results) else []
-                _osv_cache[(lib, ver)] = vulns
+                _osv_cache[(lib, ver)] = (vulns, time.monotonic())
     except Exception as exc:
         log.warning("version_scanner.osv_failed", error=str(exc))
         # Ne PAS mettre en cache les erreurs réseau — une liste vide permanente
         # ferait croire que les bibliothèques sont saines sur les rescans suivants.
 
-    return {lv: _osv_cache.get(lv, []) for lv in libs}
+    return {lv: _osv_cache[lv][0] if lv in _osv_cache else [] for lv in libs}
 
 
 async def scan_and_emit(
@@ -112,9 +119,10 @@ async def scan_and_emit(
     script_pages: dict[str, list[str]],
     bus: AsyncEventBus,
     repository: Repository,
+    model_accessor: object = None,  # callable → ApplicationModelData | None
 ) -> int:
-    """Détecte les versions, interroge OSV.dev, crée et émet des findings. Retourne le nombre de findings créés."""
-    from hdwp.core.bus.events import FINDING_CONFIRMED
+    """Détecte les versions, interroge OSV.dev, crée findings ET hypothèses d'exploitation."""
+    from hdwp.core.bus.events import FINDING_CONFIRMED, HYPOTHESIS_GENERATED
     from hdwp.core.model.schemas import ConfidenceScore, Finding
 
     detections: dict[tuple[str, str], list[str]] = {}
@@ -225,4 +233,201 @@ async def scan_and_emit(
         log.info("version_scanner.finding", lib=lib, version=ver, cves=cve_ids)
         count += 1
 
+        # Générer des hypothèses d'exploitation si le modèle est disponible
+        if model_accessor is not None:
+            try:
+                from hdwp.core.observation.cve_to_exploit_map import generate_cve_hypotheses
+                model = model_accessor()  # type: ignore[operator]
+                if model is not None:
+                    # Attacher le CVSS aux vulns pour la génération
+                    for v in vulns:
+                        v["_cvss"] = max_cvss
+                    exploit_hyps = generate_cve_hypotheses(lib, ver, vulns, model)
+                    for hyp in exploit_hyps:
+                        await bus.emit(
+                            HYPOTHESIS_GENERATED,
+                            hyp.model_dump(),
+                            source="cve_exploit_generator",
+                        )
+                    if exploit_hyps:
+                        log.info(
+                            "version_scanner.exploit_hypotheses",
+                            lib=lib, version=ver,
+                            hypotheses=len(exploit_hyps),
+                        )
+            except Exception as exc:
+                log.warning("version_scanner.exploit_gen_failed", error=str(exc))
+
     return count
+
+
+# ── OSV multi-écosystème pour les frameworks backend ─────────────────────────
+
+_TECH_TO_OSV: dict[str, tuple[str, str]] = {
+    "framework:django":   ("django",                          "PyPI"),
+    "framework:flask":    ("flask",                           "PyPI"),
+    "framework:fastapi":  ("fastapi",                         "PyPI"),
+    "framework:rails":    ("rails",                           "RubyGems"),
+    "framework:laravel":  ("laravel/framework",               "Packagist"),
+    "framework:spring":   ("org.springframework:spring-core", "Maven"),
+    "framework:express":  ("express",                         "npm"),
+    "framework:nextjs":   ("next",                            "npm"),
+    "framework:aspnet":   ("Microsoft.AspNetCore.App",        "NuGet"),
+}
+
+_OWASP_FOR_BACKEND_CVE = "A06:2021"
+
+
+async def scan_backend_cves(
+    tech_stack: list[str],
+    detected_versions: dict[str, str],
+    knowledge_base: object | None = None,
+    offline_db_path: str | None = None,
+) -> list[dict]:
+    """Interroge OSV.dev pour les CVE des frameworks backend détectés.
+
+    Requiert detected_versions pour filtrer par version — sans version connue,
+    les résultats OSV ne sont pas exploitables.
+    Persiste les résultats dans KnowledgeBase si fournie.
+
+    Mode offline : charge depuis offline_db_path (JSON) au lieu d'interroger OSV.
+    """
+    import json
+    import time
+
+    if offline_db_path:
+        try:
+            with open(offline_db_path) as f:
+                return json.load(f)
+        except Exception as exc:
+            log.warning("version_scanner.offline_db_failed", error=str(exc))
+            return []
+
+    sigs: list[dict] = []
+    queries_to_make: list[tuple[str, str, str, str]] = []  # (tech_tag, package, ecosystem, version)
+
+    for tech_tag in tech_stack:
+        if tech_tag not in _TECH_TO_OSV:
+            continue
+        package, ecosystem = _TECH_TO_OSV[tech_tag]
+        version = detected_versions.get(tech_tag, "")
+        if not version:
+            continue  # sans version, OSV retourne tous les CVE non filtrés
+        queries_to_make.append((tech_tag, package, ecosystem, version))
+
+    if not queries_to_make:
+        return []
+
+    queries = [
+        {"package": {"name": pkg, "ecosystem": eco}, "version": ver}
+        for _, pkg, eco, ver in queries_to_make
+    ]
+
+    try:
+        from hdwp.core.http_client import build_client
+        async with build_client(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.osv.dev/v1/querybatch",
+                json={"queries": queries},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", [])
+
+        for i, (tech_tag, package, ecosystem, version) in enumerate(queries_to_make):
+            vulns = results[i].get("vulns", []) if i < len(results) else []
+            for vuln in vulns:
+                cvss = 0.0
+                for sev in vuln.get("severity", []):
+                    score = sev.get("score", "")
+                    if isinstance(score, (int, float)):
+                        cvss = max(cvss, float(score))
+                    elif isinstance(score, str) and score.replace(".", "").isdigit():
+                        cvss = max(cvss, float(score))
+
+                fixed = ""
+                for aff in vuln.get("affected", []):
+                    for rng in aff.get("ranges", []):
+                        for evt in rng.get("events", []):
+                            if "fixed" in evt:
+                                fixed = evt["fixed"]
+                                break
+
+                sig = {
+                    "vuln_id": vuln.get("id", ""),
+                    "ecosystem": ecosystem,
+                    "package": package,
+                    "version_range": f">={version}",
+                    "fixed_version": fixed,
+                    "cvss_score": cvss,
+                    "owasp_category": _OWASP_FOR_BACKEND_CVE,
+                    "attack_vector": tech_tag,
+                }
+                sigs.append(sig)
+                log.info(
+                    "version_scanner.backend_cve",
+                    vuln_id=sig["vuln_id"], package=package,
+                    ecosystem=ecosystem, version=version, cvss=cvss,
+                )
+
+    except Exception as exc:
+        log.warning("version_scanner.osv_backend_failed", error=str(exc))
+
+    if sigs and knowledge_base is not None:
+        try:
+            await knowledge_base.upsert_vuln_signatures(sigs)  # type: ignore[attr-defined]
+        except Exception as exc:
+            log.warning("version_scanner.kb_upsert_failed", error=str(exc))
+
+    return sigs
+
+
+def extract_framework_versions(
+    tech_stack: list[str],
+    observed_headers: dict[str, str],
+    error_page_content: str = "",
+) -> dict[str, str]:
+    """Extrait les versions des frameworks depuis les headers HTTP et les pages d'erreur.
+
+    Retourne {tech_tag: version_string}.
+    """
+    import re
+    versions: dict[str, str] = {}
+
+    # Headers : X-Powered-By: PHP/8.1.2, Server: gunicorn/21.2.0
+    for header_name, header_val in observed_headers.items():
+        h = header_name.lower()
+        if h in ("x-powered-by", "server"):
+            # PHP/8.1.2
+            m = re.search(r'php/(\d+\.\d+[\.\d]*)', header_val, re.I)
+            if m:
+                versions["framework:php"] = m.group(1)
+            # gunicorn/21.2.0
+            m = re.search(r'gunicorn/(\d+\.\d+[\.\d]*)', header_val, re.I)
+            if m:
+                versions["server:gunicorn"] = m.group(1)
+            # Express (version rarement dans le header, mais parfois)
+            m = re.search(r'express/(\d+\.\d+[\.\d]*)', header_val, re.I)
+            if m:
+                versions["framework:express"] = m.group(1)
+
+    # Error page content : Django debug, Rails error, Spring whitespace
+    if error_page_content:
+        # Django version dans la page 500
+        m = re.search(r'Django version (\d+\.\d+[\.\d]*)', error_page_content)
+        if m:
+            versions["framework:django"] = m.group(1)
+        # Rails version
+        m = re.search(r'Rails (\d+\.\d+[\.\d]*)', error_page_content)
+        if m:
+            versions["framework:rails"] = m.group(1)
+        # Flask/Werkzeug version
+        m = re.search(r'Werkzeug/(\d+\.\d+[\.\d]*)', error_page_content)
+        if m:
+            versions["framework:flask"] = m.group(1)
+        # Spring Boot version
+        m = re.search(r'"Spring Boot".*?"(\d+\.\d+[\.\d]*)"', error_page_content)
+        if m:
+            versions["framework:spring"] = m.group(1)
+
+    return versions

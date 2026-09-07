@@ -18,6 +18,7 @@ from hdwp.core.bus.events import (
     FSM_UPDATED,
     MODEL_UPDATED,
     OBSERVATION_RAW,
+    TECH_STACK_UPDATED,
     HDWPEvent,
 )
 from hdwp.core.model.schemas import (
@@ -69,6 +70,10 @@ class ApplicationModel:
         self._last_updated: str = ""
         # Corpus: path_pattern -> list of (role_name, NormalizedRequest)
         self._request_corpus: dict[str, list[tuple[str, NormalizedRequest]]] = {}
+        # Corpus de réponses : path_pattern → role_name → [body_dict, ...]
+        # Structure parallèle (n'étend pas le tuple request_corpus pour éviter les breaking changes)
+        # Cap : 5 bodies JSON par (path, role) — taille bornée
+        self._response_corpus: dict[str, dict[str, list[dict]]] = {}
         # Auth detection: path_pattern -> role_name -> last observed status code
         self._status_by_role: dict[str, dict[str, int]] = {}
         # FSM apprise par StateMachineLearner
@@ -76,6 +81,7 @@ class ApplicationModel:
         # Tech stack et content types agrégés
         self._tech_stack: set[str] = set()
         self._detected_content_types: set[str] = set()
+        self._detected_versions: dict[str, str] = {}  # tech_tag → version string
 
         # Flow map builder
         from hdwp.core.model.flow_map_builder import FlowMapBuilder
@@ -107,6 +113,17 @@ class ApplicationModel:
 
         self._store_in_corpus(obs)
 
+        # Corpus de réponses — stocker le body JSON par rôle pour le cross-role diffing
+        if obs.response and isinstance(obs.response.body, dict):
+            _resp_path = self._normalize_path(obs.request.url)
+            _role_tag = next(
+                (tag[5:] for tag in obs.tags if tag.startswith("role:")),
+                "anonymous"
+            )
+            _role_bucket = self._response_corpus.setdefault(_resp_path, {}).setdefault(_role_tag, [])
+            if len(_role_bucket) < 5:
+                _role_bucket.append(dict(obs.response.body))
+
         # Behavioral profiling — update response size distribution for Z-score detection
         _current_path = self._normalize_path(obs.request.url)
         self._update_behavioral_profile(_current_path, obs.response.body if obs.response else None)
@@ -124,10 +141,18 @@ class ApplicationModel:
                 # (sera crawlé lors de la prochaine session si dans le scope)
                 self._store_in_corpus_by_url(link_url, obs)
 
-        # Agréger tech_stack depuis les tags d'observation (header_inspector)
+        # Agréger tech_stack depuis les tags d'observation (header_inspector + framework_fingerprint)
+        new_tags: list[str] = []
         for tag in obs.tags:
-            if tag.startswith(("server:", "framework:", "db:", "cms:")):
-                self._tech_stack.add(tag)
+            if tag.startswith(("server:", "framework:", "db:", "cms:")) and tag not in self._tech_stack:
+                new_tags.append(tag)
+        # Framework fingerprinting étendu (cookies, patterns d'URL, headers x-powered-by, etc.)
+        from hdwp.core.observation.framework_fingerprint import fingerprint_observation
+        for tag in fingerprint_observation(obs):
+            if tag not in self._tech_stack:
+                new_tags.append(tag)
+        for tag in new_tags:
+            self._tech_stack.add(tag)
 
         # Agréger content-type depuis la réponse
         if obs.response and obs.response.content_type:
@@ -164,6 +189,47 @@ class ApplicationModel:
         changed |= self._update_data_objects(obs)
         changed |= self._update_role(obs)
         changed |= await self._update_auth_required(obs)
+
+        # WAF detection sur les réponses 403/406/429/503
+        if obs.response and obs.response.status_code in (403, 406, 429, 503):
+            from hdwp.core.observation.waf_detector import detect_waf
+            waf_tag = detect_waf(obs)
+            if waf_tag and waf_tag not in self._tech_stack:
+                self._tech_stack.add(waf_tag)
+                new_tags.append(waf_tag)
+                # Marquer l'endpoint concerné
+                _waf_path = self._normalize_path(obs.request.url)
+                if _waf_path in self._endpoints:
+                    ep = self._endpoints[_waf_path]
+                    if ep.detected_waf is None:
+                        ep.detected_waf = waf_tag
+                changed = True
+
+        # Analyse sémantique de la réponse : rôles, JWTs, signaux tech dans les erreurs
+        _current_path = self._normalize_path(obs.request.url)
+        if _current_path in self._endpoints:
+            from hdwp.core.observation.response_intelligence import analyze_response
+            from hdwp.core.observation.version_scanner import extract_framework_versions
+            prev_tech_len = len(self._tech_stack)
+            analyze_response(obs, self._endpoints[_current_path], self._tech_stack)
+            if len(self._tech_stack) > prev_tech_len:
+                changed = True
+            # Extraire les versions des frameworks depuis les headers de réponse
+            if obs.response and obs.response.headers:
+                new_versions = extract_framework_versions(
+                    list(self._tech_stack),
+                    {k.lower(): v for k, v in (obs.response.headers or {}).items()},
+                    error_page_content=str(obs.response.body)[:2000]
+                    if obs.response.body and obs.response.status_code >= 400 else "",
+                )
+                for tag, version in new_versions.items():
+                    if tag not in self._detected_versions:
+                        self._detected_versions[tag] = version
+                        changed = True
+
+        # Émettre TECH_STACK_UPDATED pour chaque nouveau tag détecté
+        for tag in new_tags:
+            await self._bus.emit(TECH_STACK_UPDATED, {"tag": tag}, source="application_model")
 
         if changed:
             self._last_updated = obs.timestamp
@@ -335,6 +401,12 @@ class ApplicationModel:
             obj = DataObjectNode(schema=schema, sensitivity=_infer_sensitivity(schema))
             self._objects[schema_key] = obj
             self._detect_affects_object(obs, obj)
+            # Enregistrer que cet endpoint produit cet objet dans sa réponse
+            path_pattern = self._normalize_path(obs.request.url)
+            if path_pattern in self._endpoints:
+                ep = self._endpoints[path_pattern]
+                if obj.id not in ep.returns:
+                    ep.returns.append(obj.id)
             return True
         return False
 
@@ -498,7 +570,9 @@ class ApplicationModel:
         """Track response size distribution for Z-score anomaly detection."""
         import math
         size = len(str(response_body)) if response_body is not None else 0
-        profile = self._behavioral_profiles.setdefault(path_pattern, {"sizes": [], "mean": 0.0, "std": 1.0})
+        profile = self._behavioral_profiles.setdefault(
+            path_pattern, {"sizes": [], "mean": 0.0, "std": 1.0, "max_zscore": None}
+        )
         profile["sizes"].append(size)
         sizes = profile["sizes"][-50:]  # rolling window of 50 observations
         profile["sizes"] = sizes
@@ -506,7 +580,13 @@ class ApplicationModel:
             mean = sum(sizes) / len(sizes)
             variance = sum((s - mean) ** 2 for s in sizes) / len(sizes)
             profile["mean"] = mean
-            profile["std"] = max(math.sqrt(variance), 1.0)
+            std = max(math.sqrt(variance), 1.0)
+            profile["std"] = std
+            if len(sizes) >= 5:
+                zscore = abs((size - mean) / std)
+                prev_max = profile.get("max_zscore") or 0.0
+                if zscore > prev_max:
+                    profile["max_zscore"] = zscore
 
     def get_response_zscore(self, path_pattern: str, response_body: object) -> float | None:
         """Return Z-score of response size vs historical distribution. None if < 5 observations."""
@@ -565,8 +645,26 @@ class ApplicationModel:
         return self._last_flow_map
 
     def snapshot(self) -> ApplicationModelData:
+        from hdwp.core.model.schemas import BehavioralProfile
+
+        enriched_endpoints = []
+        for path_pattern, ep in self._endpoints.items():
+            bp_raw = self._behavioral_profiles.get(path_pattern)
+            bp = None
+            if bp_raw and bp_raw.get("sizes"):
+                bp = BehavioralProfile(
+                    mean=bp_raw["mean"],
+                    std=bp_raw["std"],
+                    sample_count=len(bp_raw["sizes"]),
+                    max_zscore_seen=bp_raw.get("max_zscore"),
+                )
+            sbr = dict(self._status_by_role.get(path_pattern, {}))
+            if bp is not None or sbr:
+                ep = ep.model_copy(update={"behavioral_profile": bp, "status_by_role": sbr})
+            enriched_endpoints.append(ep)
+
         return ApplicationModelData(
-            endpoints=list(self._endpoints.values()),
+            endpoints=enriched_endpoints,
             parameters=list(self._parameters.values()),
             objects=list(self._objects.values()),
             roles=list(self._roles.values()),
@@ -575,6 +673,8 @@ class ApplicationModel:
             fsm=self._fsm,
             tech_stack=sorted(self._tech_stack),
             detected_content_types=sorted(self._detected_content_types),
+            response_corpus=dict(self._response_corpus),
+            detected_versions=dict(self._detected_versions),
         )
 
     def update_role_mapping(

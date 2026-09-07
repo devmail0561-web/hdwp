@@ -50,9 +50,11 @@ class InferenceRegistry:
         from hdwp.core.property_engine.inference.coherence import CoherenceInference
         from hdwp.core.property_engine.inference.concurrency import ConcurrencyInference
         from hdwp.core.property_engine.inference.confidentiality import ConfidentialityInference
+        from hdwp.core.property_engine.inference.http_semantics import HttpSemanticsInference
         from hdwp.core.property_engine.inference.integrity import IntegrityInference
         from hdwp.core.property_engine.inference.state import StateInference
         from hdwp.core.property_engine.inference.temporal import TemporalInference
+        from hdwp.core.security_model.invariant_deriver import InvariantDeriver
 
         return [
             ("authorization", AuthorizationInference),
@@ -62,6 +64,8 @@ class InferenceRegistry:
             ("coherence", CoherenceInference),
             ("temporal", TemporalInference),
             ("concurrency", ConcurrencyInference),
+            ("http_semantics", HttpSemanticsInference),  # verbe HTTP × structure path
+            ("invariant_deriver", InvariantDeriver),     # invariants dérivés des observations
         ]
 
     @classmethod

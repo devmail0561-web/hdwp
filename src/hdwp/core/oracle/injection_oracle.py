@@ -439,7 +439,7 @@ def assess_injection(
             return assess_ssrf(payload, experiment)
         case "cmdi":
             return assess_cmdi(experiment)
-        case "boundary":
+        case "boundary" | "boundary_value":
             return assess_business_boundary(payload, experiment)
         case "path_traversal":
             return assess_path_traversal(experiment)
@@ -502,3 +502,22 @@ def assess_ssrf(payload: str, experiment: ExperimentResult) -> ViolationAssessme
         rationale="Aucun indicateur SSRF détecté",
         confidence_hint=0.5,
     )
+
+
+def try_extract_error_intel(experiment: ExperimentResult) -> object | None:
+    """Tente d'extraire des informations structurées depuis une réponse d'erreur.
+
+    Retourne un ErrorIntel si des informations exploitables sont trouvées,
+    None sinon. Destiné à être appelé par SemanticOracle après un verdict
+    CONFIRMED ou AMBIGUOUS sur une injection.
+    """
+    if experiment.response_received is None:
+        return None
+    try:
+        from hdwp.core.oracle.error_intel import extract
+        return extract(
+            experiment.response_received.body,
+            experiment.response_received.status_code,
+        )
+    except Exception:
+        return None

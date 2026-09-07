@@ -136,17 +136,19 @@ def compute_confidence(
     behavioral_specificity: float,
     n_experiments_done: int,
     n_experiments_required: int,
+    weights: dict[str, float] | None = None,
 ) -> ConfidenceScore:
+    w = weights if weights is not None else WEIGHTS
     oracle_strength = assessment.confidence_hint
     coverage = math.log(1 + n_experiments_done) / math.log(
         1 + max(n_experiments_required, 1)
     )
     overall = (
-        WEIGHTS["oracle_strength"] * oracle_strength
-        + WEIGHTS["reproducibility"] * reproducibility
-        + WEIGHTS["observation_quality"] * observation_quality
-        + WEIGHTS["behavioral_specificity"] * behavioral_specificity
-        + WEIGHTS["experiment_coverage"] * coverage
+        w.get("oracle_strength", WEIGHTS["oracle_strength"]) * oracle_strength
+        + w.get("reproducibility", WEIGHTS["reproducibility"]) * reproducibility
+        + w.get("observation_quality", WEIGHTS["observation_quality"]) * observation_quality
+        + w.get("behavioral_specificity", WEIGHTS["behavioral_specificity"]) * behavioral_specificity
+        + w.get("experiment_coverage", WEIGHTS["experiment_coverage"]) * coverage
     )
     return ConfidenceScore(
         oracle_strength=round(oracle_strength, 4),

@@ -94,6 +94,17 @@ class SecurityPropertyEngine:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("plugin.infer_properties_failed", plugin_id=plugin.id, error=str(exc))
 
+        # Passe composite : croise les propriétés des modules individuels pour
+        # détecter des conjonctions haute-valeur (BOLA+data_leak, injection+sensible, etc.)
+        from hdwp.core.property_engine.composite import CompositeInference
+        composite = CompositeInference()
+        all_active = list(self._properties.values())
+        composite_props = composite.infer_composite(all_active, model_data)
+        for prop in composite_props:
+            if not self._is_duplicate(prop):
+                self._properties[prop.id] = prop
+                new_properties.append(prop)
+
         for prop in new_properties:
             logger.info(
                 "property.inferred",

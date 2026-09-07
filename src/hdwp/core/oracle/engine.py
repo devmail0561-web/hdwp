@@ -27,6 +27,7 @@ from hdwp.core.bus.events import (
     EXPERIMENT_RESULT,
     FINDING_CONFIRMED,
     FINDING_REFUTED,
+    HYPOTHESIS_AMBIGUOUS,
     HYPOTHESIS_EXPERIMENTS_READY,
     HYPOTHESIS_STATUS_CHANGED,
     HDWPEvent,
@@ -69,11 +70,13 @@ class SemanticOracle:
         repository: Repository,
         llm_layer: LLMLayerProtocol | None = None,
         model_accessor: object = None,
+        tuning: object = None,
     ) -> None:
         self._bus = bus
         self._repo = repository
         self._llm_layer = llm_layer
         self._model_accessor = model_accessor  # Callable[[], ApplicationModel] | None
+        self._tuning = tuning  # TuningConfig | None — None = use module defaults
         self._results: dict[str, list[ExperimentResult]] = {}
         bus.on(EXPERIMENT_RESULT, self._on_experiment_result)
         bus.on(HYPOTHESIS_EXPERIMENTS_READY, self._on_experiments_ready)
@@ -183,6 +186,7 @@ class SemanticOracle:
         #          1 mutation + 1 replay → coverage = 1.0 (reproductibilité vérifiée)
         # Évite que experiment_coverage = n/n = 1.0 avec une seule expérience sans replay.
         all_experiments_count = len(mutations) + len(replays)
+        tuning_weights = _tuning_weights(self._tuning)
         score = compute_confidence(
             assessment=assessments[0],
             reproducibility=reproducibility,
@@ -190,13 +194,36 @@ class SemanticOracle:
             behavioral_specificity=behavioral_spec,
             n_experiments_done=all_experiments_count,
             n_experiments_required=max(2, all_experiments_count),
+            weights=tuning_weights,
         )
 
         all_refuted = all(a.verdict == ViolationVerdict.REFUTED for a in assessments)
         any_confirmed = any(a.verdict == ViolationVerdict.CONFIRMED for a in assessments)
 
-        if score.overall >= CONFIRMED_THRESHOLD and any_confirmed:
-            finding = _build_finding(hyp_id, score, assessments[0], diffs, all_results, baseline)
+        confirmed_threshold = (
+            self._tuning.confirmed_threshold if self._tuning is not None else CONFIRMED_THRESHOLD
+        )
+        severity_high = getattr(self._tuning, "severity_high_threshold", 0.90) if self._tuning else 0.90
+        severity_medium = getattr(self._tuning, "severity_medium_threshold", 0.80) if self._tuning else 0.80
+        if score.overall >= confirmed_threshold and any_confirmed:
+            # Extraire l'ErrorIntel depuis la mutation qui a déclenché le verdict
+            if mutations:
+                try:
+                    from hdwp.core.oracle.injection_oracle import try_extract_error_intel
+                    from hdwp.core.bus.events import TECH_STACK_UPDATED
+                    intel = try_extract_error_intel(mutations[0])
+                    if intel is not None:
+                        for tag in getattr(intel, "tech_tags", []):
+                            await self._bus.emit(
+                                TECH_STACK_UPDATED, {"tag": tag}, source="error_intel"
+                            )
+                except Exception:
+                    pass
+            finding = _build_finding(
+                hyp_id, score, assessments[0], diffs, all_results, baseline,
+                severity_high=severity_high, severity_medium=severity_medium,
+                winning_experiment=mutations[0] if mutations else None,
+            )
             # Enrichir le conseil de remédiation via LLM si disponible
             if self._llm_layer is not None:
                 try:
@@ -216,7 +243,8 @@ class SemanticOracle:
 
         elif all_refuted:
             finding = _build_finding(
-                hyp_id, score, assessments[0], diffs, all_results, baseline, status="REFUTED"
+                hyp_id, score, assessments[0], diffs, all_results, baseline, status="REFUTED",
+                severity_high=severity_high, severity_medium=severity_medium,
             )
             await self._repo.update_hypothesis_status(hyp_id, "REFUTED", score.overall)
             await self._bus.emit(
@@ -246,6 +274,7 @@ class SemanticOracle:
                         ),
                         n_experiments_done=len(mutations),
                         n_experiments_required=max(1, len(mutations)),
+                        weights=tuning_weights,
                     )
                     log.info(
                         "oracle.llm_disambiguation",
@@ -263,6 +292,19 @@ class SemanticOracle:
                 {"id": hyp_id, "old_status": "PENDING", "new_status": "INSUFFICIENT_DATA"},
                 source="semantic_oracle",
             )
+            # Signal dédié pour AmbiguityResolver — inclut le diff et la spec de la baseline
+            if diffs:
+                await self._bus.emit(
+                    HYPOTHESIS_AMBIGUOUS,
+                    {
+                        "hypothesis_id": hyp_id,
+                        "mutation_type": mutation_type,
+                        "score": score.overall,
+                        "diff": diffs[0].model_dump(),
+                        "baseline_spec": baseline.experiment_spec.model_dump() if baseline else None,
+                    },
+                    source="semantic_oracle",
+                )
             log.info(
                 "oracle.insufficient_data",
                 hypothesis_id=hyp_id,
@@ -280,10 +322,16 @@ def _build_finding(
     all_results: list[ExperimentResult],
     baseline: ExperimentResult,
     status: str = "CONFIRMED",
+    severity_high: float = 0.90,
+    severity_medium: float = 0.80,
+    winning_experiment: ExperimentResult | None = None,
 ) -> Finding:
     mutation_type = baseline.experiment_spec.mutation_type
     from hdwp.core.mutation_registry import owasp_cwe, remediation
 
+    # winning_request doit être la requête mutée (avec le payload), pas la baseline propre.
+    # Les règles de chaîne (ex: rule_sqli_exfil) l'inspectent pour trouver le payload SQL.
+    winning = winning_experiment or baseline
     owasp, cwe = owasp_cwe(mutation_type)
     return Finding(
         id=generate_id("FIND"),
@@ -294,26 +342,43 @@ def _build_finding(
         confidence_breakdown=score,
         owasp_category=owasp,
         cwe_id=cwe,
-        severity=_severity_from_score(score),
+        severity=_severity_from_score(score, severity_high, severity_medium),
         affected_endpoints=[_extract_endpoint(baseline.request_sent.url)],
         proof={
             "experiments": [r.id for r in all_results],
             "diffs": [d.id for d in diffs],
             "reproduction_steps": _build_repro_steps(baseline, assessment),
             "mutation_type": mutation_type,
-            "winning_request": baseline.request_sent.model_dump() if baseline else None,
-            "winning_response_sample": str(baseline.response_received.body)[:2000] if baseline and baseline.response_received else None,
+            "winning_request": winning.request_sent.model_dump() if winning else None,
+            "winning_response_sample": str(winning.response_received.body)[:2000] if winning and winning.response_received else None,
         },
         remediation_hint=remediation(mutation_type),
     )
 
 
-def _severity_from_score(score: ConfidenceScore) -> str:
-    if score.overall >= 0.90:
+def _severity_from_score(
+    score: ConfidenceScore,
+    high_threshold: float = 0.90,
+    medium_threshold: float = 0.80,
+) -> str:
+    if score.overall >= high_threshold:
         return "HIGH"
-    if score.overall >= 0.80:
+    if score.overall >= medium_threshold:
         return "MEDIUM"
     return "LOW"
+
+
+def _tuning_weights(tuning: object) -> dict[str, float] | None:
+    """Extrait le dict de poids du TuningConfig, ou None pour utiliser les défauts."""
+    if tuning is None:
+        return None
+    return {
+        "oracle_strength": getattr(tuning, "weight_oracle_strength", 0.25),
+        "reproducibility": getattr(tuning, "weight_reproducibility", 0.30),
+        "observation_quality": getattr(tuning, "weight_observation_quality", 0.15),
+        "behavioral_specificity": getattr(tuning, "weight_behavioral_specificity", 0.15),
+        "experiment_coverage": getattr(tuning, "weight_experiment_coverage", 0.15),
+    }
 
 
 def _build_repro_steps(

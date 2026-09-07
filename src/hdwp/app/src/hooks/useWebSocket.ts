@@ -11,6 +11,7 @@ export function useWebSocket() {
     addEvent, setProxyActive, setIdsDetected, setWsConnected, setEndpoints,
     setStatus, setPhase, setErrorMessage,
     incrementHypothesisCount, incrementPropertyCount, incrementExperimentCount,
+    addTechStackTag, incrementAmbiguousCount,
   } = useScanStore()
   const { addFinding } = useFindingsStore()
   const { setFlowMap } = useFlowStore()
@@ -55,6 +56,13 @@ export function useWebSocket() {
         if (event.type === 'hypothesis.generated') incrementHypothesisCount()
         if (event.type === 'property.inferred') incrementPropertyCount()
         if (event.type === 'experiment.result') incrementExperimentCount()
+        if (event.type === 'tech_stack.updated') {
+          const tag = (event.payload as Record<string, unknown>)?.tag
+          if (typeof tag === 'string') addTechStackTag(tag)
+        }
+        if (event.type === 'hypothesis.ambiguous') {
+          incrementAmbiguousCount()
+        }
         if (event.type === 'scan.completed') {
           setStatus('done')
           setPhase('DONE')
@@ -80,6 +88,7 @@ export function useWebSocket() {
     addEvent, addFinding, setProxyActive, setIdsDetected, setWsConnected, setEndpoints,
     setFlowMap, setStatus, setPhase, setErrorMessage,
     incrementHypothesisCount, incrementPropertyCount, incrementExperimentCount,
+    addTechStackTag, incrementAmbiguousCount,
   ])
 
   useEffect(() => {

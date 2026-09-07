@@ -660,3 +660,21 @@ class RequestSelector:
                 )
             )
         return plans
+
+    def select_for_spec(
+        self,
+        spec: ExperimentSpec,
+        hyp: Hypothesis,
+        model_snapshot: ApplicationModelData,
+        request_corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+    ) -> list[ConcreteExperimentPlan]:
+        """Résout un seul ExperimentSpec en ConcreteExperimentPlans.
+
+        Utilisé par l'engine pour les follow-up specs activés dynamiquement
+        pendant la boucle d'exécution (expériences adaptatives).
+        """
+        from hdwp.core import mutation_registry
+
+        return mutation_registry.plan(
+            spec.mutation_type, hyp, spec, model_snapshot, request_corpus
+        )

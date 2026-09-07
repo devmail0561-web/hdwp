@@ -109,6 +109,8 @@ class KnowledgeBase:
                 await conn.execute(text("SELECT target_type FROM pattern_stats LIMIT 1"))
             except Exception:
                 try:
+                    # Nettoyer une éventuelle table fantôme d'une migration avortée
+                    await conn.execute(text("DROP TABLE IF EXISTS pattern_stats_new"))
                     await conn.execute(text("""
                         CREATE TABLE pattern_stats_new (
                             property_type TEXT NOT NULL,
@@ -136,6 +138,109 @@ class KnowledgeBase:
                     )
                 except Exception:
                     pass
+
+            # Table vuln_signatures pour les CVE/GHSA récupérés depuis OSV.dev/NVD
+            try:
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS vuln_signatures (
+                        vuln_id TEXT PRIMARY KEY,
+                        ecosystem TEXT DEFAULT '',
+                        package TEXT DEFAULT '',
+                        version_range TEXT DEFAULT '',
+                        fixed_version TEXT DEFAULT '',
+                        cvss_score REAL DEFAULT 0.0,
+                        owasp_category TEXT DEFAULT '',
+                        attack_vector TEXT DEFAULT '',
+                        last_fetched TEXT DEFAULT ''
+                    )
+                """))
+            except Exception:
+                pass
+
+    async def upsert_vuln_signatures(self, sigs: list[dict]) -> int:
+        """Persiste des signatures CVE/GHSA dans la knowledge base. Retourne le nombre upserted."""
+        from datetime import UTC, datetime
+        from hdwp.core.knowledge.models import VulnSignatureRecord
+
+        if not sigs:
+            return 0
+        now = datetime.now(UTC).isoformat()
+        engine = await self._get_engine()
+        count = 0
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            for sig in sigs:
+                rec = VulnSignatureRecord(
+                    vuln_id=sig.get("vuln_id", ""),
+                    ecosystem=sig.get("ecosystem", ""),
+                    package=sig.get("package", ""),
+                    version_range=sig.get("version_range", ""),
+                    fixed_version=sig.get("fixed_version", ""),
+                    cvss_score=float(sig.get("cvss_score", 0.0)),
+                    owasp_category=sig.get("owasp_category", ""),
+                    attack_vector=sig.get("attack_vector", ""),
+                    last_fetched=now,
+                )
+                try:
+                    existing = await session.get(VulnSignatureRecord, rec.vuln_id)
+                    if existing:
+                        existing.cvss_score = rec.cvss_score
+                        existing.fixed_version = rec.fixed_version
+                        existing.last_fetched = rec.last_fetched
+                        session.add(existing)
+                    else:
+                        session.add(rec)
+                    count += 1
+                except Exception:
+                    pass
+            await session.commit()
+        return count
+
+    async def get_signatures_for_package(
+        self, package: str, ecosystem: str
+    ) -> list[dict]:
+        """Retourne les CVE connues pour un package/écosystème donné."""
+        from hdwp.core.knowledge.models import VulnSignatureRecord
+
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            result = await session.exec(
+                select(VulnSignatureRecord).where(
+                    VulnSignatureRecord.package == package,
+                    VulnSignatureRecord.ecosystem == ecosystem,
+                )
+            )
+            records = result.all()
+        return [
+            {
+                "vuln_id": r.vuln_id,
+                "package": r.package,
+                "ecosystem": r.ecosystem,
+                "version_range": r.version_range,
+                "fixed_version": r.fixed_version,
+                "cvss_score": r.cvss_score,
+                "owasp_category": r.owasp_category,
+                "attack_vector": r.attack_vector,
+            }
+            for r in records
+        ]
+
+    async def export_vuln_signatures(self) -> list[dict]:
+        """Exporte toutes les signatures CVE pour usage offline."""
+        from hdwp.core.knowledge.models import VulnSignatureRecord
+
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            result = await session.exec(select(VulnSignatureRecord))
+            records = result.all()
+        return [
+            {
+                "vuln_id": r.vuln_id, "ecosystem": r.ecosystem, "package": r.package,
+                "version_range": r.version_range, "fixed_version": r.fixed_version,
+                "cvss_score": r.cvss_score, "owasp_category": r.owasp_category,
+                "attack_vector": r.attack_vector, "last_fetched": r.last_fetched,
+            }
+            for r in records
+        ]
 
     async def record_session(
         self,

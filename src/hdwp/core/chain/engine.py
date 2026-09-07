@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import structlog
 
-from hdwp.core.bus.events import FINDING_CONFIRMED, FINDINGS_CORRELATED, HDWPEvent
+from hdwp.core.bus.events import FINDING_CONFIRMED, FINDINGS_CORRELATED
 from hdwp.core.chain.rules import (
     rule_active_pivot,
     rule_bola_escalation,
@@ -57,7 +57,7 @@ class ChainEngine:
             finding = Finding.model_validate(event.payload)
             self._confirmed_findings.append(finding)
         except Exception:
-            pass
+            log.warning("chain.finding_parse_error", exc_info=True)
 
     def has_pending_chains(self) -> bool:
         return len(self._confirmed_findings) >= 2
@@ -133,11 +133,11 @@ class ChainEngine:
             results.append(result)
             if success:
                 await self._save_chain_finding(spec, proof)
-                await self._bus.emit(FINDINGS_CORRELATED, HDWPEvent(
-                    type=FINDINGS_CORRELATED, source="chain_engine",
-                    payload={"chain_type": spec.chain_type, "description": spec.description,
-                             "status": "success"},
-                ))
+                await self._bus.emit(FINDINGS_CORRELATED, {
+                    "chain_type": spec.chain_type,
+                    "description": spec.description,
+                    "status": "success",
+                }, source="chain_engine")
         return results
 
     async def discover_chains(self, finding_ids: list[str] | None = None) -> list[dict]:
@@ -230,16 +230,12 @@ class ChainEngine:
             success, proof = await self._execute_chain(spec, exp_engine)
             if success:
                 await self._save_chain_finding(spec, proof)
-                await self._bus.emit(FINDINGS_CORRELATED, HDWPEvent(
-                    type=FINDINGS_CORRELATED,
-                    source="chain_engine",
-                    payload={
-                        "chain_type": spec.chain_type,
-                        "description": spec.description,
-                        "trigger_finding_ids": spec.precondition_finding_ids,
-                        "status": "success",
-                    },
-                ))
+                await self._bus.emit(FINDINGS_CORRELATED, {
+                    "chain_type": spec.chain_type,
+                    "description": spec.description,
+                    "trigger_finding_ids": spec.precondition_finding_ids,
+                    "status": "success",
+                }, source="chain_engine")
                 executed.append(spec)
                 log.info("chain.success", chain_type=spec.chain_type)
             else:
@@ -261,23 +257,24 @@ class ChainEngine:
 
         import base64
         auth_headers: dict = {}
-        for role in self._roles:
-            if getattr(role, "name", None) != role_name and role_name != "anonymous":
-                continue
-            cred = getattr(role, "credentials", None)
-            if not cred:
-                continue
-            ctype = getattr(cred, "type", "")
-            if ctype == "bearer" and getattr(cred, "token", None):
-                auth_headers["Authorization"] = f"Bearer {cred.token}"
-                break
-            elif ctype == "basic" and getattr(cred, "username", None):
-                enc = base64.b64encode(f"{cred.username}:{cred.password}".encode()).decode()
-                auth_headers["Authorization"] = f"Basic {enc}"
-                break
-            elif ctype == "cookie" and getattr(cred, "token", None):
-                auth_headers["Cookie"] = cred.token
-                break
+        if role_name != "anonymous":
+            for role in self._roles:
+                if getattr(role, "name", None) != role_name:
+                    continue
+                cred = getattr(role, "credentials", None)
+                if not cred:
+                    continue
+                ctype = getattr(cred, "type", "")
+                if ctype == "bearer" and getattr(cred, "token", None):
+                    auth_headers["Authorization"] = f"Bearer {cred.token}"
+                    break
+                elif ctype == "basic" and getattr(cred, "username", None):
+                    enc = base64.b64encode(f"{cred.username}:{cred.password}".encode()).decode()
+                    auth_headers["Authorization"] = f"Basic {enc}"
+                    break
+                elif ctype == "cookie" and getattr(cred, "token", None):
+                    auth_headers["Cookie"] = cred.token
+                    break
 
         all_headers = {**dict(request.headers or {}), **auth_headers,
                        "User-Agent": "HDWP-Chain/0.1"}
@@ -346,7 +343,8 @@ class ChainEngine:
                 context[var_name] = extract_value(body, path)
 
         terminal = step_results[-1] if step_results else {}
-        success = terminal.get("status_code", 500) < 400
+        # 3xx redirections ≠ exploitation réussie : seuls les 2xx confirment l'accès effectif
+        success = 200 <= terminal.get("status_code", 500) < 300
 
         proof = {
             "chain_type": spec.chain_type,

@@ -167,7 +167,14 @@ def _detect_suspicious_fields(body: object, depth: int = 0) -> list[str]:
     for k, v in body.items():
         if isinstance(v, str) and len(v) >= 16:
             entropy = _field_entropy(v)
-            is_sensitive = entropy > 4.5 or any(p.match(v) for p in _SENSITIVE_PATTERNS)
+            # Pour les patterns structurels (JWT, hex, email, card) : pas besoin d'entropy élevée.
+            # Pour la regex base64 (très large) : exiger entropy > 3.5 pour éviter les faux positifs
+            # sur des codes produit, identifiants alphanumériques, etc.
+            is_sensitive = (
+                entropy > 4.5
+                or any(p.match(v) for p in _SENSITIVE_PATTERNS[:3] if entropy > 3.5)  # JWT/hex/base64 + entropy
+                or any(p.match(v) for p in _SENSITIVE_PATTERNS[3:])                    # email/card (structurel)
+            )
             if is_sensitive:
                 suspicious.append(k)
         elif isinstance(v, dict):

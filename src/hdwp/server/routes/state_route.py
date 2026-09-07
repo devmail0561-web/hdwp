@@ -23,6 +23,9 @@ async def get_state(request: Request) -> StateResponse:
     model_confidence = 0.0
     property_count = 0
     experiment_count = 0
+    tech_stack: list[str] = []
+    detected_versions: dict[str, str] = {}
+    detected_content_types: list[str] = []
     if session.engine:
         try:
             snap = session.engine._app_model.snapshot()
@@ -32,6 +35,9 @@ async def get_state(request: Request) -> StateResponse:
             if session.engine._prop_engine:
                 property_count = len(session.engine._prop_engine.properties)
             experiment_count = len(session.engine._exp_engine._results_buffer)
+            tech_stack = snap.tech_stack
+            detected_versions = snap.detected_versions
+            detected_content_types = snap.detected_content_types
         except Exception:
             pass
 
@@ -48,6 +54,9 @@ async def get_state(request: Request) -> StateResponse:
         experiment_count=experiment_count,
         proxy_active=session.proxy_active,
         error_message=session.error_message,
+        tech_stack=tech_stack,
+        detected_versions=detected_versions,
+        detected_content_types=detected_content_types,
     )
 
 

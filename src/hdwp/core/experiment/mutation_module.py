@@ -204,7 +204,7 @@ def apply_origin_test(plan: ConcreteExperimentPlan, sm: SessionManager) -> Norma
 
 def apply_method_override(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
     """Ajoute X-HTTP-Method-Override header pour contourner le contrôle de méthode."""
-    override_method = plan.mutation_params.get("override_method", "DELETE")
+    override_method = plan.experiment_spec.mutation_params.get("override_method", "DELETE")
     new_headers = {
         **plan.baseline_request.headers,
         "X-HTTP-Method-Override": override_method,

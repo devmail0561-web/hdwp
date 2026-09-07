@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import TYPE_CHECKING
 
 import structlog
@@ -36,6 +38,8 @@ class ObservationEngine:
         self._llm_layer = llm_layer
         self._proxy_url = proxy_url
         self._crawler: ActiveCrawler | None = None
+        self._crawl_task: asyncio.Task | None = None
+        self._model_accessor: object | None = None  # injecté par HDWPEngine pour rescan
 
     async def start(self) -> None:
         self._running = True
@@ -66,7 +70,10 @@ class ObservationEngine:
             proxy_url=self._proxy_url,
             emit_observations=(self._proxy_url is None),
         )
-        await self._crawler.crawl(self._context.base_url)
+        self._crawl_task = asyncio.ensure_future(self._crawler.crawl(self._context.base_url))
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._crawl_task
+        self._crawl_task = None
 
         # SPA crawl via Playwright — only when proxy is active (port known)
         # Routes browser traffic through the HDWP MITM proxy automatically
@@ -89,6 +96,61 @@ class ObservationEngine:
 
     async def stop(self) -> None:
         self._running = False
+        if self._crawl_task and not self._crawl_task.done():
+            self._crawl_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._crawl_task
+            log.info("observation_engine.crawl_cancelled")
+
+    async def rescan_known_endpoints(self) -> None:
+        """Re-émet des observations pour les endpoints déjà connus du modèle.
+
+        Utilisé en mode continu pour détecter les changements d'état après des exploits
+        confirmés ou des modifications de comportement entre itérations.
+        Ne crawle pas de nouveaux liens — seulement les endpoints déjà dans le modèle.
+        """
+        if self._model_accessor is None:
+            return
+        model = self._model_accessor()  # type: ignore[operator]
+        if model is None:
+            return
+
+        from hdwp.core.http_client import build_client
+        from hdwp.core.observation.normalizer import normalize_request, normalize_response
+
+        rate_limiter = TokenBucket.from_rpm(
+            self._context.config.options.max_requests_per_minute
+        )
+
+        endpoints_to_scan = model.endpoints[:20]  # cap pour limiter le trafic
+        for ep in endpoints_to_scan:
+            if not self._scope_guard.check(ep.path, "GET").name == "ALLOWED":
+                continue
+            url = self._context.base_url.rstrip("/") + ep.path
+            for role in self._context.config.roles:
+                await rate_limiter.acquire()
+                try:
+                    from hdwp.core.observation.active_crawler import _build_auth_headers
+                    async with build_client(timeout=10.0, proxy_url=self._proxy_url) as client:
+                        client.headers.update(_build_auth_headers(role.credentials) or {})
+                        resp = await client.get(url, follow_redirects=False)
+                        norm_req = normalize_request(
+                            method="GET", url=url,
+                            headers=dict(client.headers), body=None,
+                            query_params={}, path_params={},
+                        )
+                        norm_resp = normalize_response(resp)
+                        from hdwp.core.model.schemas import RawObservation
+                        obs = RawObservation(
+                            request=norm_req,
+                            response=norm_resp,
+                            tags=[f"role:{role.name}", "rescan:true"],
+                            session_id=self._context.session_id,
+                        )
+                        from hdwp.core.bus.events import OBSERVATION_RAW
+                        await self._bus.emit(OBSERVATION_RAW, obs.model_dump(), source="rescan")
+                except Exception as exc:
+                    log.debug("rescan.endpoint_failed", url=url, error=str(exc))
 
     async def start_passive(self, port: int = 8080, role_name: str = "anonymous") -> None:
         """Démarre le proxy passif (nécessite mitmproxy : pip install hdwp[proxy])."""

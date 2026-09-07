@@ -54,7 +54,7 @@ class IntegrityInference:
         has_body_params = any(p for p in model.parameters if p.location == "body")
         if has_body_params:
             for ep in model.endpoints:
-                if not ({"POST", "PUT"} & set(ep.methods)):
+                if not ({"POST", "PUT", "PATCH"} & set(ep.methods)):
                     continue
                 stmt = (
                     f"endpoint '{ep.path}' does not accept unexpected fields "

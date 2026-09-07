@@ -72,12 +72,47 @@ class OptionsConfig(BaseModel):
     # Proxy sortant — socks5h://127.0.0.1:9150 = Tor Browser par défaut.
     # Mettre à null pour connexion directe, ou une URL HTTP(S) pour un proxy MITM type Burp.
     tor_proxy: str | None = "socks5h://127.0.0.1:9150"
+    # Mode exploration continue : le moteur itère après la passe initiale tant que
+    # de nouvelles hypothèses sont disponibles (pivots, confirmations, désambiguïsations).
+    continuous: bool = False
+    scan_time_limit_minutes: int = 60  # durée max du mode continu (0 = illimité)
+    # Chemin vers un fichier JSON de signatures CVE pour les missions en réseau isolé.
+    offline_cve_db: str | None = None
 
 
 class PluginConfig(BaseModel):
     enabled: list[str] = []   # vide = tous les plugins découverts actifs
     disabled: list[str] = []  # liste noire explicite (IDs à exclure)
     config: dict[str, dict[str, Any]] = {}
+
+
+class TuningConfig(BaseModel):
+    """Réglages fins du moteur — toutes les valeurs ont des défauts sûrs."""
+
+    # Seuil de confirmation (score global confidence → CONFIRMED)
+    confirmed_threshold: float = 0.85
+
+    # Seuils de sévérité du rapport final
+    severity_high_threshold: float = 0.90
+    severity_medium_threshold: float = 0.80
+
+    # Seuils de score de priorité des hypothèses
+    priority_high_threshold: float = 0.60
+    priority_medium_threshold: float = 0.30
+
+    # Poids du modèle de confiance 5 dimensions
+    weight_oracle_strength: float = 0.25
+    weight_reproducibility: float = 0.30
+    weight_observation_quality: float = 0.15
+    weight_behavioral_specificity: float = 0.15
+    weight_experiment_coverage: float = 0.15
+
+    # Poids d'impact par type de propriété (clés = PropertyType.value)
+    # {} = utiliser les BASE_WEIGHTS définis dans knowledge/base.py
+    impact_weights: dict[str, float] = {}
+
+    # Boost de confidence BOLA quand deux rôles distincts obtiennent status=200
+    bola_role_confirmation_boost: float = 0.15
 
 
 class HDWPContextConfig(BaseModel):
@@ -89,3 +124,4 @@ class HDWPContextConfig(BaseModel):
     plugins: PluginConfig = PluginConfig()
     discovery: DiscoveryConfig = DiscoveryConfig()
     llm: LLMConfig = LLMConfig()
+    tuning: TuningConfig = TuningConfig()

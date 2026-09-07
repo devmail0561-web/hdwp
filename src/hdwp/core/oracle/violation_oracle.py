@@ -75,14 +75,15 @@ def _assess_identity_swap(
                     ),
                     confidence_hint=0.7,
                 )
-            # score is None + pas de diff comportemental → réponse identique sans champs d'identité
-            # → probablement des données publiques ou la même réponse pour tout le monde → AMBIGUOUS
-            if diff.data_identity_score is None and not diff.behavioral_difference:
+            # Sans champs d'identité comparables, on ne peut pas distinguer
+            # "l'attaquant accède aux données d'un autre" de "données dynamiques normales".
+            # Toujours AMBIGUOUS quand data_identity_score est None — même si les valeurs diffèrent.
+            if diff.data_identity_score is None:
                 return ViolationAssessment(
                     verdict=ViolationVerdict.AMBIGUOUS,
                     rationale=(
-                        "Identity swap: même réponse structurelle sans champs d'identité comparables "
-                        "— impossible de déterminer si les données appartiennent à un autre utilisateur"
+                        "Identity swap: aucun champ d'identité comparable (data_identity_score=None) "
+                        "— impossible de confirmer que les données appartiennent à un autre utilisateur"
                     ),
                     confidence_hint=0.4,
                 )
@@ -90,7 +91,7 @@ def _assess_identity_swap(
                 verdict=ViolationVerdict.CONFIRMED,
                 rationale=(
                     f"Identity swap succeeded: attacker receives different data "
-                    f"(similarity={diff.body_similarity:.2f}, identity_score={diff.data_identity_score}, status={exp_status})"
+                    f"(similarity={diff.body_similarity:.2f}, identity_score={diff.data_identity_score:.2f}, status={exp_status})"
                 ),
                 confidence_hint=0.9 if diff.body_similarity >= 0.9 else 0.7,
             )
@@ -196,11 +197,11 @@ def _assess_field_injection(
     from hdwp.core.oracle.injection_oracle import assess_injection
 
     params = experiment.experiment_spec.mutation_params
-    payload_type = params.get("payload_type", "sqli")
+    payload_type = params.get("payload_type") or experiment.experiment_spec.mutation_type
     payload = params.get("payload", "")
     expected_result = params.get("expected_result", "")
     extra_field = params.get("extra_field", "")
-    return assess_injection(payload_type, payload, experiment, expected_result, extra_field)
+    return assess_injection(payload_type, payload, experiment, expected_result, extra_field, baseline=baseline)
 
 
 def _assess_jwt_manipulation(

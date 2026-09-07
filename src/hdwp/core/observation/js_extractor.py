@@ -161,3 +161,64 @@ def _is_valid_path(path: str) -> bool:
     if path.count("/") > 8:
         return False
     return True
+
+
+# ── DOM Sink Analysis ─────────────────────────────────────────────────────────
+
+from dataclasses import dataclass
+
+@dataclass
+class DomSink:
+    sink_type: str          # "innerHTML", "eval", "document.write", etc.
+    source_hint: str | None # variable ou input apparent dans le contexte
+    snippet: str            # 80 chars de contexte
+
+_DOM_SINK_PATTERNS: dict[str, re.Pattern] = {
+    "innerHTML":        re.compile(r'\.innerHTML\s*[+]?=\s*(.{1,80})', re.M),
+    "outerHTML":        re.compile(r'\.outerHTML\s*=\s*(.{1,80})', re.M),
+    "document.write":   re.compile(r'document\.write\s*\((.{1,80})\)', re.M),
+    "document.writeln": re.compile(r'document\.writeln\s*\((.{1,80})\)', re.M),
+    "eval":             re.compile(r'\beval\s*\((.{1,80})\)', re.M),
+    "setTimeout_str":   re.compile(r'setTimeout\s*\(\s*["\'](.{1,60})["\']', re.M),
+    "setInterval_str":  re.compile(r'setInterval\s*\(\s*["\'](.{1,60})["\']', re.M),
+    "location.href":    re.compile(r'location\.href\s*=\s*(.{1,80})', re.M),
+    "location.replace": re.compile(r'location\.replace\s*\((.{1,80})\)', re.M),
+    "location.hash":    re.compile(r'location\.hash', re.M),
+    "postMessage_listener": re.compile(r"addEventListener\s*\(\s*['\"]message['\"]", re.M),
+    "jquery.html":      re.compile(r'\$\s*\([^)]{1,60}\)\.html\s*\((.{1,60})\)', re.M),
+    "jquery.append":    re.compile(r'\$\s*\([^)]{1,60}\)\.(?:append|prepend|after|before)\s*\((.{1,60})\)', re.M),
+    "insertAdjacentHTML": re.compile(r'insertAdjacentHTML\s*\(\s*["\'][^"\']+["\']\s*,\s*(.{1,80})\)', re.M),
+}
+
+# Patterns indiquant que le contenu vient d'une source utilisateur contrôlable
+_USER_INPUT_SOURCES = re.compile(
+    r'location\.(?:hash|search|href|pathname)|'
+    r'document\.(?:referrer|URL|documentURI)|'
+    r'window\.name|'
+    r'(?:get|query)Param|'
+    r'(?:url|href|src|data)\s*[=:]\s*(?:req|request|params|query|input)',
+    re.I
+)
+
+
+def extract_dom_sinks(js_source: str) -> list[DomSink]:
+    """Détecte les sinks DOM dangereux dans un script JavaScript.
+
+    Retourne la liste des sinks trouvés avec leur contexte.
+    Les sinks où la source semble contrôlable par l'utilisateur sont prioritaires.
+    """
+    sinks: list[DomSink] = []
+    for sink_type, pattern in _DOM_SINK_PATTERNS.items():
+        for m in pattern.finditer(js_source):
+            snippet = m.group(0)[:100].replace("\n", " ").strip()
+            context = js_source[max(0, m.start() - 200): m.end() + 200]
+            source_hint = None
+            user_src = _USER_INPUT_SOURCES.search(context)
+            if user_src:
+                source_hint = user_src.group(0)[:60]
+            sinks.append(DomSink(
+                sink_type=sink_type,
+                source_hint=source_hint,
+                snippet=snippet,
+            ))
+    return sinks

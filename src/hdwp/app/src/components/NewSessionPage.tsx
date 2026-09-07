@@ -58,8 +58,27 @@ export function NewSessionPage() {
     try {
       await fetch(`/api/session/${s.session_id}`, { method: 'DELETE' })
       setSessions(prev => prev.filter(x => x.session_id !== s.session_id))
+      // Nettoyer localStorage si c'est la session active
+      try {
+        const saved = localStorage.getItem('hdwp_active_session')
+        if (saved) {
+          const { sessionId: sid } = JSON.parse(saved) as { sessionId: string }
+          if (sid === s.session_id) localStorage.removeItem('hdwp_active_session')
+        }
+      } catch { /* ignore */ }
     } catch { /* ignore */ }
     finally { setDeleting(null) }
+  }
+
+  const handlePurgeAll = async () => {
+    if (!confirm('Supprimer TOUTES les sessions ?\nCette action est irréversible.')) return
+    setSessionsLoading(true)
+    try {
+      await fetch('/api/sessions', { method: 'DELETE' })
+      setSessions([])
+      localStorage.removeItem('hdwp_active_session')
+    } catch { /* ignore */ }
+    finally { setSessionsLoading(false) }
   }
 
   useEffect(() => {
@@ -143,8 +162,23 @@ export function NewSessionPage() {
           fontFamily: 'var(--font-title)', fontSize: 9, color: 'var(--green-dim)',
           letterSpacing: 2, padding: '10px 14px 8px',
           borderBottom: '1px solid var(--border)', background: '#060606', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <span style={{ color: 'var(--green)' }}>[ </span>SESSIONS RÉCENTES<span style={{ color: 'var(--green)' }}> ]</span>
+          <span><span style={{ color: 'var(--green)' }}>[ </span>SESSIONS RÉCENTES<span style={{ color: 'var(--green)' }}> ]</span></span>
+          {sessions.length > 0 && (
+            <button
+              onClick={handlePurgeAll}
+              style={{
+                background: 'transparent', border: '1px solid #1a1a1a',
+                color: '#2a2a2a', fontFamily: 'var(--font-title)', fontSize: 7,
+                padding: '1px 6px', cursor: 'pointer', letterSpacing: 1,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#ff0066'; e.currentTarget.style.color = '#ff0066' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a1a1a'; e.currentTarget.style.color = '#2a2a2a' }}
+            >
+              PURGER TOUT
+            </button>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>

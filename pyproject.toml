@@ -84,6 +84,10 @@ hdwp = "hdwp.cli.main:app"
 "core.configuration.cache_poisoning" = "hdwp.plugins.core.configuration.cache_poisoning:CachePoisoningPlugin"
 "core.configuration.http_smuggling" = "hdwp.plugins.core.configuration.http_smuggling:HTTPSmugglingPlugin"
 "core.information_flow.http_parameter_pollution" = "hdwp.plugins.core.information_flow.http_parameter_pollution:HTTPParameterPollutionPlugin"
+# Plugins tech-adaptatifs (framework-spécifiques)
+"core.configuration.spring_actuator" = "hdwp.plugins.core.configuration.spring_actuator:SpringActuatorPlugin"
+"core.injection.django_debug" = "hdwp.plugins.core.injection.django_debug:DjangoDebugPlugin"
+"core.authorization.laravel_mass_assign" = "hdwp.plugins.core.authorization.laravel_mass_assign:LaravelMassAssignPlugin"
 
 [project.entry-points."hdwp.inference"]
 authorization   = "hdwp.core.property_engine.inference.authorization:AuthorizationInference"

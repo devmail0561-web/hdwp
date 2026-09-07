@@ -439,6 +439,10 @@ class HDWPProxy:
             writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
             await writer.drain()
             t_writer.close()
+            try:
+                await t_writer.wait_closed()
+            except Exception:
+                pass
             return
 
         # Inject JS collector into HTML responses

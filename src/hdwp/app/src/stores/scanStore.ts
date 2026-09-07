@@ -14,6 +14,7 @@ interface ScanStore {
   findingsCount: number
   propertyCount: number
   experimentCount: number
+  ambiguousCount: number
   errorMessage: string
   endpoints: EndpointNode[]
   events: BusEvent[]
@@ -21,6 +22,8 @@ interface ScanStore {
   idsDetected: boolean
   wsConnected: boolean
   authRequiredUrl: string | null
+  techStack: string[]
+  detectedVersions: Record<string, string>
   setStatus(s: ScanStore['status']): void
   setPhase(p: string): void
   setSessionId(id: string): void
@@ -36,6 +39,8 @@ interface ScanStore {
   incrementHypothesisCount(): void
   incrementPropertyCount(): void
   incrementExperimentCount(): void
+  incrementAmbiguousCount(): void
+  addTechStackTag(tag: string): void
   reset(): void
   clearMetrics(): void
 }
@@ -51,6 +56,7 @@ export const useScanStore = create<ScanStore>((set) => ({
   findingsCount: 0,
   propertyCount: 0,
   experimentCount: 0,
+  ambiguousCount: 0,
   errorMessage: '',
   endpoints: [],
   events: [],
@@ -58,6 +64,8 @@ export const useScanStore = create<ScanStore>((set) => ({
   idsDetected: false,
   wsConnected: false,
   authRequiredUrl: null,
+  techStack: [],
+  detectedVersions: {},
   setStatus: (status) => set({ status }),
   setPhase: (phase) => set({ phase }),
   setSessionId: (sessionId) => set({ sessionId }),
@@ -79,6 +87,8 @@ export const useScanStore = create<ScanStore>((set) => ({
     sessionId: s.session_id || null,
     target: s.target_url || '',
     errorMessage: s.error_message,
+    techStack: s.tech_stack ?? [],
+    detectedVersions: s.detected_versions ?? {},
   }),
   setProxyActive: (proxyActive) => set({ proxyActive }),
   setIdsDetected: (idsDetected) => set({ idsDetected }),
@@ -88,17 +98,22 @@ export const useScanStore = create<ScanStore>((set) => ({
   incrementHypothesisCount: () => set((s) => ({ hypothesisCount: s.hypothesisCount + 1 })),
   incrementPropertyCount: () => set((s) => ({ propertyCount: s.propertyCount + 1 })),
   incrementExperimentCount: () => set((s) => ({ experimentCount: s.experimentCount + 1 })),
+  incrementAmbiguousCount: () => set((s) => ({ ambiguousCount: s.ambiguousCount + 1 })),
+  addTechStackTag: (tag) => set((s) => ({
+    techStack: s.techStack.includes(tag) ? s.techStack : [...s.techStack, tag],
+  })),
   reset: () => set({
     status: 'idle', sessionId: null, target: '', phase: 'IDLE',
     modelConfidence: 0, endpointCount: 0, hypothesisCount: 0, findingsCount: 0,
-    propertyCount: 0, experimentCount: 0, errorMessage: '',
+    propertyCount: 0, experimentCount: 0, ambiguousCount: 0, errorMessage: '',
     endpoints: [], events: [], proxyActive: false, idsDetected: false,
-    authRequiredUrl: null,
+    authRequiredUrl: null, techStack: [], detectedVersions: {},
   }),
   clearMetrics: () => set({
     phase: 'IDLE', modelConfidence: 0,
     endpointCount: 0, hypothesisCount: 0, findingsCount: 0,
-    propertyCount: 0, experimentCount: 0, errorMessage: '',
-    endpoints: [], events: [], proxyActive: false, idsDetected: false, authRequiredUrl: null,
+    propertyCount: 0, experimentCount: 0, ambiguousCount: 0, errorMessage: '',
+    endpoints: [], events: [], proxyActive: false, idsDetected: false,
+    authRequiredUrl: null, techStack: [], detectedVersions: {},
   }),
 }))

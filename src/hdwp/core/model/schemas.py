@@ -54,6 +54,14 @@ class RawObservation(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class BehavioralProfile(BaseModel):
+    """Profil statistique de la distribution de taille des réponses d'un endpoint."""
+    mean: float = 0.0
+    std: float = 1.0
+    sample_count: int = 0
+    max_zscore_seen: float | None = None  # plus haut |zscore| observé passivement
+
+
 class EndpointNode(BaseModel):
     id: str = Field(default_factory=lambda: generate_id("EP"))
     path: str
@@ -65,6 +73,16 @@ class EndpointNode(BaseModel):
     response_content_type: str | None = None  # MIME type de la réponse observée
     accepts_xml: bool = False                  # Endpoint accepte/retourne XML
     is_graphql: bool = False                   # Endpoint GraphQL détecté
+    # Données comportementales exposées depuis ApplicationModel._behavioral_profiles
+    behavioral_profile: BehavioralProfile | None = None
+    # Dernier statut HTTP observé par rôle : {"user_a": 200, "anonymous": 403}
+    status_by_role: dict[str, int] = Field(default_factory=dict)
+    # Intelligence sémantique des réponses (peuplé par ResponseIntelligence)
+    contains_privilege_field: bool = False      # body contient role/permissions/scope/is_admin
+    observed_roles: list[str] = Field(default_factory=list)   # valeurs de rôles vues
+    jwt_field_names: list[str] = Field(default_factory=list)  # champs qui contiennent des JWTs
+    error_tech_signals: list[str] = Field(default_factory=list)  # ["oracle", "django", ...]
+    detected_waf: str | None = None             # "waf:cloudflare", "waf:modsecurity", etc.
 
 
 class ParameterNode(BaseModel):
@@ -123,6 +141,11 @@ class ApplicationModelData(BaseModel):
     fsm: ApplicationFSM | None = None
     tech_stack: list[str] = Field(default_factory=list)             # ["server:Apache/2.4", "framework:Django"]
     detected_content_types: list[str] = Field(default_factory=list) # ["application/json", "application/xml"]
+    # Corpus de réponses par rôle : path_pattern → role_name → [body_dict, ...]
+    # Peuplé par ApplicationModel, transmis aux modules d'inférence pour le cross-role diffing
+    response_corpus: dict[str, dict[str, list[dict[str, Any]]]] = Field(default_factory=dict)
+    # Versions détectées des frameworks : {"framework:django": "3.2.5"}
+    detected_versions: dict[str, str] = Field(default_factory=dict)
 
 
 class PropertyType(str, Enum):
@@ -157,6 +180,14 @@ class ExperimentSpec(BaseModel):
     base_request: NormalizedRequest
     mutation_params: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
+    # Expérimentation adaptative : la condition est évaluée sur le résultat de mutation
+    # Si True → les follow_up_specs sont ajoutés à la queue d'exécution
+    trigger_condition: dict[str, Any] | None = None
+    follow_up_specs: list["ExperimentSpec"] = Field(default_factory=list)
+
+
+# Pydantic v2 exige model_rebuild() pour les modèles auto-référentiels
+ExperimentSpec.model_rebuild()
 
 
 @dataclass
@@ -186,6 +217,8 @@ class Hypothesis(BaseModel):
     priority_rationale: str = ""
     required_experiments: list[ExperimentSpec] = Field(default_factory=list)
     confidence: float = 0.0
+    disambiguation_attempts: int = 0  # garde contre les boucles infinies de désambiguïsation
+    property_type: str | None = None  # clé d'arm bandit : PropertyType.value ou None
 
 
 class ExperimentResult(BaseModel):

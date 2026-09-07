@@ -16,6 +16,7 @@ mais pas les automates arbitrairement complexes.
 """
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 
 import structlog
@@ -28,7 +29,6 @@ from hdwp.core.model.schemas import (
     FSMTransition,
     NormalizedRequest,
     RawObservation,
-    generate_id,
 )
 from hdwp.core.model.url_utils import normalize_url_path
 
@@ -99,9 +99,11 @@ class StateMachineLearner:
         for seq in self._sequences.values():
             all_symbols.update(seq)
 
-        # État initial
+        # État initial — ID stable basé sur le contenu de la FSM
+        all_sym_key = "|".join(sorted(f"{p}:{m}:{s}" for p, m, s in all_symbols))
+        initial_id = "FSM-S-" + hashlib.sha256(b"initial:" + all_sym_key.encode()).hexdigest()[:12]
         initial = FSMState(
-            id=generate_id("FSM-S"),
+            id=initial_id,
             label="initial",
             observable_conditions=["No requests sent"],
         )
@@ -110,9 +112,10 @@ class StateMachineLearner:
 
         for sym in all_symbols:
             path, method, status = sym
+            sym_str = f"{method}:{path}:{status}"
             state = FSMState(
-                id=generate_id("FSM-S"),
-                label=f"{method}:{path}:{status}",
+                id="FSM-S-" + hashlib.sha256(sym_str.encode()).hexdigest()[:12],
+                label=sym_str,
                 observable_conditions=[f"{method} {path} returned {status}"],
             )
             states.append(state)
@@ -141,8 +144,9 @@ class StateMachineLearner:
 
         confidence = min(0.9, len(self._sequences) / 10.0)
 
+        fsm_id = "FSM-" + hashlib.sha256(all_sym_key.encode()).hexdigest()[:12]
         return ApplicationFSM(
-            id=generate_id("FSM"),
+            id=fsm_id,
             states=states,
             transitions=transitions,
             initial_state=initial.id,

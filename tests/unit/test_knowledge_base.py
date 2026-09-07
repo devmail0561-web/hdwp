@@ -329,4 +329,4 @@ def test_inference_registry_default_with_kb_stats() -> None:
     kb_stats = {("authorization", "object_ref_change"): {"confirmed_rate": 0.8, "total": 5}}
     reg = InferenceRegistry.default_with_kb_stats(kb_stats)
     modules = reg.list_active()
-    assert len(modules) == 7
+    assert len(modules) == 9  # 7 built-in + HttpSemanticsInference + InvariantDeriver

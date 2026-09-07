@@ -378,9 +378,24 @@ def knowledge(
                     "(session_meta conserve).[/green]"
                 )
 
+            case "export-cves":
+                import json as _json
+                sigs = await kb.export_vuln_signatures()
+                output = "cve_cache.json"
+                with open(output, "w") as f:
+                    _json.dump(sigs, f, indent=2)
+                console.print(f"[green]{len(sigs)} signature(s) CVE exportée(s) → {output}[/green]")
+
+            case "refresh-cves":
+                from hdwp.core.observation.version_scanner import scan_backend_cves
+                # Utiliser le tech_stack et detected_versions depuis la dernière session
+                # (nécessite une cible — utiliser un scan récent ou passer --target)
+                console.print("[yellow]Fonctionnalité disponible pendant un scan actif ou "
+                              "via hdwp run --context fichier.yaml[/yellow]")
+
             case _:
                 console.print(
-                    f"[red]Action inconnue : {action}. Utiliser : stats, reset[/red]"
+                    f"[red]Action inconnue : {action}. Utiliser : stats, reset, export-cves, refresh-cves[/red]"
                 )
                 raise typer.Exit(1)
 

@@ -195,8 +195,19 @@ export function FlowTab() {
 
   const buildLayout = (map: FlowMap) => {
     const canvas = canvasRef.current
-    const W = canvas?.width ?? 600
-    const H = canvas?.height ?? 400
+    const container = containerRef.current
+    // Utiliser les dimensions CSS du conteneur (disponibles immédiatement via layout)
+    // plutôt que les attributs buffer du canvas (300×150 par défaut avant ResizeObserver)
+    const rect = container?.getBoundingClientRect()
+    const W = (rect && rect.width > 50) ? rect.width : (canvas?.width || 600)
+    const H = (rect && rect.height > 50) ? rect.height : (canvas?.height || 400)
+    // Synchroniser les dimensions du buffer avec le conteneur si besoin
+    if (canvas && rect && rect.width > 0 && rect.height > 0) {
+      if (canvas.width !== Math.floor(rect.width) || canvas.height !== Math.floor(rect.height)) {
+        canvas.width = Math.floor(rect.width)
+        canvas.height = Math.floor(rect.height)
+      }
+    }
 
     const endpointSet = new Set<string>()
     for (const e of map.edges) {
@@ -255,9 +266,46 @@ export function FlowTab() {
         })
       })
     }
+    // Run physics warm-up so nodes spread naturally before first render
+    const nodeMap: Record<string, NodeState> = {}
+    for (const n of nodes) nodeMap[n.id] = n
+    const springLen = 130
+    for (let iter = 0; iter < 80; iter++) {
+      // Repulsion
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const A = nodes[i], B = nodes[j]
+          const dx = A.x - B.x, dy = A.y - B.y
+          const dist = Math.max(Math.hypot(dx, dy), 1)
+          const f = 2500 / (dist * dist)
+          const fx = (dx / dist) * f, fy = (dy / dist) * f
+          A.vx += fx; A.vy += fy
+          B.vx -= fx; B.vy -= fy
+        }
+      }
+      // Spring attraction along edges
+      for (const e of map.edges) {
+        const A = nodeMap[e.from_endpoint], B = nodeMap[e.to_endpoint]
+        if (!A || !B) continue
+        const dx = B.x - A.x, dy = B.y - A.y
+        const dist = Math.max(Math.hypot(dx, dy), 1)
+        const f = (dist - springLen) * 0.025
+        const fx = (dx / dist) * f, fy = (dy / dist) * f
+        A.vx += fx; A.vy += fy
+        B.vx -= fx; B.vy -= fy
+      }
+      // Integrate
+      for (const n of nodes) {
+        n.vx *= 0.82; n.vy *= 0.82
+        n.x = Math.max(PAD, Math.min(W - PAD, n.x + n.vx))
+        n.y = Math.max(PAD, Math.min(H - PAD, n.y + n.vy))
+      }
+    }
+    // Zero velocities after warm-up
+    for (const n of nodes) { n.vx = 0; n.vy = 0 }
+
     nodesRef.current = nodes
     setNodeCount(nodes.length)
-    // edgeCount removed
   }
 
   // ── Rebuild nodes when flowMap changes ────────────────────────────────────

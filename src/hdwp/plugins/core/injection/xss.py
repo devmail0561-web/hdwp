@@ -120,22 +120,52 @@ class XSSPlugin(HDWPPlugin):
             if content_type and "json" in content_type.lower() and "html" not in content_type.lower():
                 continue
 
-            experiments: list[ExperimentSpec] = []
-            for payload in XSS_PAYLOADS:
-                experiments.append(
+            # Chaîne adaptative XSS :
+            # Sonde 1 : payload brut → si réfléchi tel quel → CONFIRMED
+            # Si filtré (body_not_contains) → essayer les variantes encodées/bypass
+            sonde_basic = ExperimentSpec(
+                mutation_type="field_injection",
+                base_request=NormalizedRequest(method="GET", url=""),
+                mutation_params={
+                    "parameter_name": param.name, "parameter_location": param.location,
+                    "payload": "<script>alert(1)</script>",
+                    "payload_type": "xss", "endpoint_path": ep_path,
+                },
+                description=f"XSS probe: {param.name} basic",
+                trigger_condition={"type": "body_not_contains", "value": "<script>alert(1)"},
+                follow_up_specs=[
                     ExperimentSpec(
                         mutation_type="field_injection",
                         base_request=NormalizedRequest(method="GET", url=""),
                         mutation_params={
-                            "parameter_name": param.name,
-                            "parameter_location": param.location,
-                            "payload": payload,
-                            "payload_type": "xss",
-                            "endpoint_path": ep_path,
+                            "parameter_name": param.name, "parameter_location": param.location,
+                            "payload": "%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+                            "payload_type": "xss", "endpoint_path": ep_path,
                         },
-                        description=f"XSS test: {param.name}={payload[:30]}",
-                    )
-                )
+                        description=f"XSS URL-encoded: {param.name}",
+                    ),
+                    ExperimentSpec(
+                        mutation_type="field_injection",
+                        base_request=NormalizedRequest(method="GET", url=""),
+                        mutation_params={
+                            "parameter_name": param.name, "parameter_location": param.location,
+                            "payload": "<img src=x onerror=alert(1)>",
+                            "payload_type": "xss", "endpoint_path": ep_path,
+                        },
+                        description=f"XSS img onerror: {param.name}",
+                    ),
+                    ExperimentSpec(
+                        mutation_type="field_injection",
+                        base_request=NormalizedRequest(method="GET", url=""),
+                        mutation_params={
+                            "parameter_name": param.name, "parameter_location": param.location,
+                            "payload": "javascript:alert(1)",
+                            "payload_type": "xss", "endpoint_path": ep_path,
+                        },
+                        description=f"XSS javascript: {param.name}",
+                    ),
+                ],
+            )
 
             hypotheses.append(
                 Hypothesis(
@@ -146,7 +176,7 @@ class XSSPlugin(HDWPPlugin):
                     ),
                     priority="HIGH",
                     priority_rationale="XSS permet vol de sessions et exécution de code côté client",
-                    required_experiments=experiments,
+                    required_experiments=[sonde_basic],
                 )
             )
 

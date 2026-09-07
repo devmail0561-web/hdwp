@@ -36,6 +36,12 @@ AUTH_REQUIRED = "auth.required"
 SCAN_COMPLETED = "scan.completed"
 SCAN_ERROR = "scan.error"
 FINDINGS_CORRELATED = "findings.correlated"
+# Emis par SemanticOracle quand une hypothèse retourne AMBIGUOUS/INSUFFICIENT_DATA.
+# Payload : {"hypothesis_id": str, "mutation_type": str, "score": float, "diff_ids": list[str]}
+HYPOTHESIS_AMBIGUOUS = "hypothesis.ambiguous"
+# Emis par ApplicationModel quand un nouveau tag framework:/db:/cms: est détecté.
+# Payload : {"tag": str}  ex: {"tag": "framework:laravel"}
+TECH_STACK_UPDATED = "tech_stack.updated"
 
 ALL_EVENT_TYPES = [
     OBSERVATION_RAW,
@@ -57,6 +63,8 @@ ALL_EVENT_TYPES = [
     SCAN_COMPLETED,
     SCAN_ERROR,
     FINDINGS_CORRELATED,
+    HYPOTHESIS_AMBIGUOUS,
+    TECH_STACK_UPDATED,
 ]
 
 

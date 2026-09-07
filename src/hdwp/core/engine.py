@@ -180,8 +180,16 @@ class HDWPEngine:
         kb_path = context.config.options.knowledge_db or DEFAULT_KB_PATH
         kb = KnowledgeBase(db_path=kb_path)
         url_target_type = classify_target(context.base_url)
+        tuning = context.config.tuning
+        # Fusionner les poids d'impact du TuningConfig avec les poids KB adaptés
         adapted_weights = await kb.get_adapted_weights(target_type=url_target_type)
-        prioritizer = HypothesisPrioritizer.with_weights(adapted_weights)
+        if tuning.impact_weights:
+            adapted_weights.update(tuning.impact_weights)
+        prioritizer = HypothesisPrioritizer.with_weights(
+            adapted_weights,
+            high_threshold=tuning.priority_high_threshold,
+            medium_threshold=tuning.priority_medium_threshold,
+        )
         confidence_weights = await kb.get_confidence_weights()
         app_model.set_confidence_weights(confidence_weights)
         session_count = await kb.get_session_count()
@@ -225,10 +233,17 @@ class HDWPEngine:
             prioritizer=prioritizer,
             llm_layer=llm_layer,
         )
-        oracle = SemanticOracle(bus, repository, llm_layer=llm_layer,
-                                model_accessor=app_model.snapshot)  # connecte le Z-score comportemental
+        oracle = SemanticOracle(
+            bus, repository, llm_layer=llm_layer,
+            model_accessor=app_model.snapshot,
+            tuning=tuning,
+        )
         PassiveFindingEngine(bus, repository)
         report_engine = ReportEngine(bus, repository)
+
+        # AmbiguityResolver : relance des expériences de désambiguïsation sur verdict AMBIGUOUS
+        from hdwp.core.oracle.ambiguity_resolver import AmbiguityResolver
+        AmbiguityResolver(bus, repository)
 
         # FSM Learner: s'abonne a observation.raw, publie fsm.updated
         from hdwp.core.state_machine.learner import StateMachineLearner
@@ -395,6 +410,7 @@ class HDWPEngine:
                 script_pages=self._obs_engine.collected_script_pages,
                 bus=self._bus,
                 repository=self._repository,
+                model_accessor=self._app_model.snapshot,
             )
             if vs_count > 0:
                 log.info("engine.version_scan_done", findings=vs_count)
@@ -415,6 +431,33 @@ class HDWPEngine:
             log.info("engine.chains_start")
             await self._chain_engine.run_pending_chains(self._exp_engine)
             await self._bus.drain()
+
+        # ── Mode continu : itérations supplémentaires jusqu'à épuisement ou timeout ──
+        if self._context.config.options.continuous:
+            import time
+            time_limit = self._context.config.options.scan_time_limit_minutes
+            deadline = time.monotonic() + time_limit * 60 if time_limit > 0 else float("inf")
+            iteration = 0
+            # Injecter le model_accessor dans obs_engine pour rescan
+            self._obs_engine._model_accessor = self._app_model.snapshot
+            while time.monotonic() < deadline:
+                pending = self._hyp_engine.get_pending()
+                if not pending:
+                    log.info("engine.continuous_complete", iterations=iteration)
+                    break
+                iteration += 1
+                log.info("engine.continuous_iteration", iteration=iteration, pending=len(pending))
+
+                # Re-observer les endpoints connus pour détecter les changements d'état
+                await self._obs_engine.rescan_known_endpoints()
+                await self._bus.drain()
+
+                await self._exp_engine.run_pending(pending)
+                await self._bus.drain()
+
+                if self._chain_engine.has_pending_chains():
+                    await self._chain_engine.run_pending_chains(self._exp_engine)
+                    await self._bus.drain()
 
         # Recuperer les findings confirmes
         findings = await self._repository.list_findings(status="CONFIRMED")

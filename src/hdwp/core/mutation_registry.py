@@ -74,6 +74,12 @@ def _lazy_assess(name: str, baseline: object, experiment: object, diff: object) 
                 "field_injection": _assess_field_injection,
                 "jwt_manipulation": _assess_jwt_manipulation,
                 "origin_test": _assess_cors,
+                "nosqli": _assess_field_injection,
+                "path_traversal": _assess_field_injection,
+                "open_redirect": _assess_field_injection,
+                "type_confusion": _assess_field_injection,
+                "boundary_value": _assess_field_injection,
+                "parameter_pollution": _assess_field_injection,
             }
         )
     assessor = _violation_assessors.get(name)

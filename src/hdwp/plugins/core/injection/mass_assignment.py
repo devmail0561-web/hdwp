@@ -96,7 +96,10 @@ class MassAssignmentPlugin(HDWPPlugin):
             experiments = [
                 ExperimentSpec(
                     mutation_type="field_injection",
-                    base_request=NormalizedRequest(method="POST", url=""),
+                    base_request=NormalizedRequest(
+                        method=next((m for m in ep.methods if m in {"PUT", "PATCH", "POST"}), "POST"),
+                        url="",
+                    ),
                     mutation_params={
                         "payload": "true",
                         "payload_type": "mass_assign",

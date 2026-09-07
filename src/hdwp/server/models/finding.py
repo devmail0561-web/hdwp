@@ -4,6 +4,15 @@
 from pydantic import BaseModel
 
 
+class ConfidenceBreakdown(BaseModel):
+    oracle_strength: float = 0.0
+    reproducibility: float = 0.0
+    observation_quality: float = 0.0
+    behavioral_specificity: float = 0.0
+    experiment_coverage: float = 0.0
+    overall: float = 0.0
+
+
 class FindingResponse(BaseModel):
     id: str
     hypothesis_id: str
@@ -15,3 +24,6 @@ class FindingResponse(BaseModel):
     cwe_id: str = ""
     affected_endpoints: list[str] = []
     remediation_hint: str = ""
+    # Champs enrichis — toujours présents (défaut vide pour rétro-compatibilité)
+    confidence_breakdown: ConfidenceBreakdown = ConfidenceBreakdown()
+    proof: dict = {}

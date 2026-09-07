@@ -26,3 +26,17 @@ class SessionMetaRecord(SQLModel, table=True):
     role_count: int = 0
     bola_param_count: int = 0
     target_type: str = "unknown"
+
+
+class VulnSignatureRecord(SQLModel, table=True):
+    """Signatures de vulnérabilités CVE/GHSA récupérées depuis OSV.dev/NVD."""
+    __tablename__ = "vuln_signatures"
+    vuln_id: str = Field(primary_key=True)   # CVE-2024-XXXXX ou GHSA-xxx-xxx-xxx
+    ecosystem: str = ""                       # "PyPI", "npm", "Maven", "RubyGems"
+    package: str = ""                         # "django", "express", etc.
+    version_range: str = ""                   # ">=3.2,<3.2.15"
+    fixed_version: str = ""                   # "3.2.15"
+    cvss_score: float = 0.0
+    owasp_category: str = ""                  # "A06:2021"
+    attack_vector: str = ""                   # indice pour la génération d'hypothèses
+    last_fetched: str = ""                    # ISO timestamp

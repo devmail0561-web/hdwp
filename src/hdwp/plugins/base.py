@@ -43,6 +43,21 @@ class HDWPPlugin(ABC):
     def data_access(self) -> str:
         return "MODEL_READ"
 
+    def tech_stack_required(self) -> set[str]:
+        """Tags tech_stack requis pour activer ce plugin (ex: {'framework:spring'}).
+        Retourne un set vide = actif sur toutes les cibles (comportement par défaut).
+        """
+        return set()
+
+    async def on_refresh(self, signatures: list[dict]) -> None:
+        """Appelé quand de nouvelles signatures CVE sont disponibles pour ce plugin.
+
+        Les plugins peuvent mettre à jour leurs payload lists ou filtres en réponse.
+        Les signatures sont des dicts avec les clés : vuln_id, package, ecosystem,
+        version_range, fixed_version, cvss_score, owasp_category, attack_vector.
+        """
+        pass
+
     async def on_load(self) -> None:
         pass
 

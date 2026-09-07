@@ -58,7 +58,7 @@ async def list_sessions(request: Request) -> list[dict]:
             result.append(d)
 
     result.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
-    return result
+    return result[:50]
 
 
 @router.delete("/session/{session_id}")
@@ -83,6 +83,31 @@ async def delete_session(session_id: str, request: Request) -> dict:
             raise HTTPException(500, f"Impossible de supprimer {ws}: {exc}") from exc
 
     return {"ok": True, "session_id": session_id}
+
+
+@router.delete("/sessions")
+async def delete_all_sessions(request: Request) -> dict:
+    """Purge toutes les sessions — mémoire et disque."""
+    import shutil
+
+    from hdwp.core.paths import WORKSPACES_DIR
+
+    srv_state: ServerState = request.app.state.server_state
+    srv_state._sessions.clear()
+    srv_state._active_id = None
+
+    deleted = 0
+    errors = 0
+    if WORKSPACES_DIR.exists():
+        for ws in WORKSPACES_DIR.iterdir():
+            if ws.is_dir() and (ws / "session.json").exists():
+                try:
+                    shutil.rmtree(ws)
+                    deleted += 1
+                except Exception:
+                    errors += 1
+
+    return {"ok": True, "deleted": deleted, "errors": errors}
 
 
 @router.post("/session/{session_id}/resume", response_model=SessionResponse)

