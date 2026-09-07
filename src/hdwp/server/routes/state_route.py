@@ -26,6 +26,10 @@ async def get_state(request: Request) -> StateResponse:
     tech_stack: list[str] = []
     detected_versions: dict[str, str] = {}
     detected_content_types: list[str] = []
+    threat_score_max = 0.0
+    invariant_violation_count = 0
+    invariant_count = 0
+    waf_detected = False
     if session.engine:
         try:
             snap = session.engine._app_model.snapshot()
@@ -38,6 +42,19 @@ async def get_state(request: Request) -> StateResponse:
             tech_stack = snap.tech_stack
             detected_versions = snap.detected_versions
             detected_content_types = snap.detected_content_types
+        except Exception:
+            pass
+        try:
+            if getattr(session.engine, "_threat_engine", None) is not None:
+                scores = session.engine._threat_engine.scores
+                if scores:
+                    threat_score_max = max(scores.values())
+            if getattr(session.engine, "_invariant_store", None) is not None:
+                all_invs = session.engine._invariant_store.all_invariants()
+                invariant_count = len(all_invs)
+                invariant_violation_count = sum(inv.violation_count for inv in all_invs)
+            if getattr(session.engine, "_adaptive_payload_engine", None) is not None:
+                waf_detected = bool(session.engine._adaptive_payload_engine.detected_wafs)
         except Exception:
             pass
 
@@ -57,6 +74,10 @@ async def get_state(request: Request) -> StateResponse:
         tech_stack=tech_stack,
         detected_versions=detected_versions,
         detected_content_types=detected_content_types,
+        threat_score_max=threat_score_max,
+        invariant_violation_count=invariant_violation_count,
+        invariant_count=invariant_count,
+        waf_detected=waf_detected,
     )
 
 

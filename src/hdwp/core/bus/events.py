@@ -47,6 +47,11 @@ THREAT_MODEL_UPDATED = "threat.model.updated"
 INVARIANT_VIOLATED = "invariant.violated"
 CROSSROLE_DIFF_CONFIRMED = "crossrole.diff.confirmed"
 TEMPORAL_ANOMALY_DETECTED = "temporal.anomaly.detected"
+PAYLOAD_ADAPTED = "payload.adapted"
+WAF_SIGNATURE_DETECTED = "waf.signature.detected"
+ATTACK_STATE_UPDATED = "attack.state.updated"
+GOAL_REACHED = "goal.reached"
+PRECONDITION_MISSING = "precondition.missing"
 
 ALL_EVENT_TYPES = [
     OBSERVATION_RAW,
@@ -74,6 +79,11 @@ ALL_EVENT_TYPES = [
     INVARIANT_VIOLATED,
     CROSSROLE_DIFF_CONFIRMED,
     TEMPORAL_ANOMALY_DETECTED,
+    PAYLOAD_ADAPTED,
+    WAF_SIGNATURE_DETECTED,
+    ATTACK_STATE_UPDATED,
+    GOAL_REACHED,
+    PRECONDITION_MISSING,
 ]
 
 

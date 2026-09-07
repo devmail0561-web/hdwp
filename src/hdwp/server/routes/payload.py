@@ -161,10 +161,24 @@ async def _run_passive_confirm(finding: Any, session: Any) -> dict:
 
     start_t = time.monotonic()
     try:
-        from hdwp.core.http_client import build_client
-        async with build_client() as client:
-            r = await client.get(url, headers={"User-Agent": "HDWP-Engine/0.1"})
+        from hdwp.core.http_client import build_client, get_proxy
+        last_exc: Exception | None = None
+        r = None
+        if get_proxy():
+            try:
+                async with build_client() as client:
+                    r = await client.get(url, headers={"User-Agent": "HDWP-Engine/0.1"})
+            except Exception as exc:
+                last_exc = exc
+        if r is None:
+            try:
+                async with build_client(proxy_url=None) as client:
+                    r = await client.get(url, headers={"User-Agent": "HDWP-Engine/0.1"})
+            except Exception as exc:
+                raise HTTPException(500, f"Erreur lors de la confirmation : {exc}") from (last_exc or exc)
         elapsed_ms = (time.monotonic() - start_t) * 1000
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Erreur lors de la confirmation : {exc}") from exc
 

@@ -1,6 +1,6 @@
 # Progression de l'implémentation — HDWP Engine
 
-Dernière mise à jour : 2026-09-03
+Dernière mise à jour : 2026-09-07
 
 ---
 
@@ -19,13 +19,48 @@ Phase 6  Proxy, FSM, Alembic, OpenAPI [DONE] ███████████�
 Audit corrections (v0.3.1)            [DONE] ████████████████████ 100%
 Phase 7  LLM complet                  [DONE] ████████████████████ 100%
 Apprentissage adaptatif                [DONE] ████████████████████ 100%
+V3 Sprint 1  Reasoning Foundation      [DONE] ████████████████████ 100%
+V3 Sprint 2  Enriched Oracle           [DONE] ████████████████████ 100%
+V3 UI Sync + Proxy fixes               [DONE] ████████████████████ 100%
 ```
 
-**Tests :** 491 | `ruff check src/` : 0 erreurs | Fichiers source : 62 | Version : 0.5.0
+**Version : 3.0.0** | Fichiers source Python : ~110 | Composants TypeScript : 12 stores/hooks/composants v3
 
 ---
 
-## Composants par statut
+## Composants V3 (ajoutés depuis v2.2.0)
+
+### V3 Backend
+
+| Composant | Fichier | Event émis |
+|---|---|---|
+| ThreatModelEngine | `core/threat/engine.py` | `threat.model.updated` |
+| AssetRegistry + AttackSurfaceScorer | `core/threat/asset_registry.py`, `scorer.py` | — |
+| InvariantStore | `core/model/invariant_store.py` | `invariant.violated` |
+| ContextualHypothesisEngine | `core/reasoning/layer.py` | — |
+| CrossRoleDiffEngine | `core/oracle/crossrole_diff.py` | `crossrole.diff.confirmed` |
+| TemporalAnomalyDetector | `core/oracle/temporal_detector.py` | `temporal.anomaly.detected` |
+| AdaptivePayloadEngine | `core/experiment/adaptive_payload.py` | `payload.adapted`, `waf.signature.detected` |
+| WAFDialogEngine | `core/experiment/waf_dialog.py` | — |
+| AttackGraphPlanner (A*) | `core/attack_graph/planner.py` | `goal.reached` |
+| PreconditionSolver | `core/attack_graph/precondition_solver.py` | `precondition.missing` |
+| AttackState / StateEffects / AttackTransition | `core/attack_graph/state.py` | — |
+| EvidenceGraph | `core/knowledge/evidence_graph.py` | — |
+| StructuralIndex | `core/knowledge/structural_index.py` | — |
+
+### V3 Frontend
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| v3Store | `app/src/stores/v3Store.ts` | Collections v3 (listes bornées à 100) |
+| IntelTab | `app/src/components/IntelTab.tsx` | Onglet INTEL — 6 sections temps réel |
+| useWebSocket (v3) | `app/src/hooks/useWebSocket.ts` | 8 handlers events v3 |
+| types/hdwp.ts (v3) | `app/src/types/hdwp.ts` | 8 interfaces + discriminated unions |
+| MetricsPanel (V3 INTEL) | `app/src/components/MetricsPanel.tsx` | Threat score, violations, WAF |
+
+---
+
+## Composants par statut (v1-v2)
 
 ### IMPLEMENTES
 
@@ -76,37 +111,9 @@ Apprentissage adaptatif                [DONE] ███████████�
 
 | Composant | Fichier | Statut |
 |---|---|---|
-| IntegrityInference | `core/property_engine/inference/integrity.py` | **Implémenté** — SQLi/XSS/SSTI/mass_assign |
-| StateInference | `core/property_engine/inference/state.py` | Stub — nécessite FSM (Phase 6) |
-| CoherenceInference | `core/property_engine/inference/coherence.py` | Stub — CORS/headers partiellement via PassiveFindingEngine |
-| TemporalInference | `core/property_engine/inference/temporal.py` | Stub — nécessite FSM (Phase 6) |
-| ConcurrencyInference | `core/property_engine/inference/concurrency.py` | Stub — nécessite TemporalModule intégré |
-| `_on_finding_refuted` | `core/model/application_model.py` | Log de traçabilité — raffinement complet Phase 6 |
-
-### A IMPLEMENTER — Phase 5
-
-| Composant | Fichier cible | Note |
-|---|---|---|
-| ReportEngine | `core/report/engine.py` | Markdown, JSON, HAR |
-| CLI complète | `cli/commands/report.py`, `replay.py` | Progress bars rich |
-| LLM disambiguate | `core/llm/layer.py` | Phase 5.5 — débloquer AMBIGUOUS |
-
-### A IMPLEMENTER — Phase 5+
-
-| Composant | Phase | Fichier cible |
-|---|---|---|
-| ReportEngine | 5 | `core/report/engine.py` |
-| Markdown renderer | 5 | `core/report/markdown.py` |
-| JSON export | 5 | `core/report/json_export.py` |
-| HAR exporter | 5 | `core/report/har_exporter.py` |
-| CLI complète | 5 | `cli/commands/run.py`, `report.py`, `replay.py`, `plugin.py` |
-| LLMLayer (disambiguate) | 5.5 | `core/llm/layer.py` |
-| ProxyCapture | 6 | `core/observation/proxy_capture.py` |
-| FSM Learner (séquences) | 6 | `core/state_machine/learner.py` |
-| TemporalModule | 6 | `core/experiment/temporal_module.py` |
-| Alembic migrations | 6 | `alembic/` |
-| sqli, xss, jwt, cors, ... | 6 | `plugins/core/*/` |
-| LLMLayer (complet) | 7 | `core/llm/layer.py` |
+| StateInference | `core/property_engine/inference/state.py` | Stub — FSM implémentée mais inférence state peu peuplée |
+| CoherenceInference | `core/property_engine/inference/coherence.py` | CORS/headers partiellement via PassiveFindingEngine |
+| ConcurrencyInference | `core/property_engine/inference/concurrency.py` | Stub — TemporalModule intégré mais TOCTOU expérimental |
 
 ---
 
@@ -120,6 +127,8 @@ Apprentissage adaptatif                [DONE] ███████████�
 | ADR-004 | SQLite par défaut, PostgreSQL optionnel | Zéro infrastructure pour usage solo |
 | ADR-005 | ScopeGuard non-débrayable au runtime | Protection éthique par défaut |
 | ADR-006 | Propriétés comme primitives de premier ordre | OWASP/CWE = classifications a posteriori, pas points de départ |
+| ADR-007 | Tor opt-in (non par défaut) | `_active_proxy=None` par défaut — évite les échecs silencieux si Tor Browser absent |
+| ADR-008 | V3 events bridgés via EventBridge sans modification | `ALL_EVENT_TYPES` itéré exhaustivement — nouveaux events forwarded automatiquement |
 | ADR-007 | Confiance multi-dimensionnelle 5D | Un scalaire unique masque les sources d'incertitude |
 | ADR-008 | ViolationOracle conscient du type de mutation | `identity_swap` : similar=vuln (inversé vs diff classique) |
 | ADR-009 | L* remplacé par clustering de séquences | L* = 2-4 semaines, hors portée pour Phase 6 |

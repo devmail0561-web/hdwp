@@ -2,7 +2,13 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useScanStore } from '../stores/scanStore'
 import { useFindingsStore } from '../stores/findingsStore'
 import { useFlowStore } from '../stores/flowStore'
-import type { EndpointNode, Finding, FlowMap } from '../types/hdwp'
+import { useV3Store } from '../stores/v3Store'
+import type {
+  EndpointNode, Finding, FlowMap,
+  ThreatModelUpdated, InvariantViolated, CrossRoleDiff,
+  TemporalAnomaly, WafSignature, PayloadAdapted,
+  GoalReached, PreconditionMissing,
+} from '../types/hdwp'
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
@@ -73,6 +79,23 @@ export function useWebSocket() {
           const errMsg = (event.payload as Record<string, unknown>)?.error
           if (typeof errMsg === 'string') setErrorMessage(errMsg)
         }
+        // V3 events
+        if (event.type === 'threat.model.updated')
+          useV3Store.getState().setThreatModel(event.payload as ThreatModelUpdated)
+        if (event.type === 'invariant.violated')
+          useV3Store.getState().addInvariantViolation(event.payload as InvariantViolated)
+        if (event.type === 'crossrole.diff.confirmed')
+          useV3Store.getState().addCrossRoleDiff(event.payload as CrossRoleDiff)
+        if (event.type === 'temporal.anomaly.detected')
+          useV3Store.getState().addTemporalAnomaly(event.payload as TemporalAnomaly)
+        if (event.type === 'waf.signature.detected')
+          useV3Store.getState().addWafSignature(event.payload as WafSignature)
+        if (event.type === 'payload.adapted')
+          useV3Store.getState().addPayloadAdapted(event.payload as PayloadAdapted)
+        if (event.type === 'goal.reached')
+          useV3Store.getState().addGoalReached(event.payload as GoalReached)
+        if (event.type === 'precondition.missing')
+          useV3Store.getState().addPreconditionMissing(event.payload as PreconditionMissing)
       } catch {
         // ignore malformed
       }

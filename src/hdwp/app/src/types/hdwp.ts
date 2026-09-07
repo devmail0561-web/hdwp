@@ -71,6 +71,11 @@ export interface StateResponse {
   tech_stack: string[]
   detected_versions: Record<string, string>
   detected_content_types: string[]
+  // V3 intelligence fields
+  threat_score_max?: number
+  invariant_violation_count?: number
+  invariant_count?: number
+  waf_detected?: boolean
 }
 
 export interface LLMStatus {
@@ -223,4 +228,69 @@ export interface ExploitAction {
   demo_url: string | null
   instructions: string[]
   copy_ready: boolean
+}
+
+// ── V3 event payload interfaces ───────────────────────────────────────────────
+
+export interface ThreatModelUpdated {
+  scores: Record<string, number>
+  classifications: Record<string, string>
+}
+
+export interface InvariantViolated {
+  endpoint_path: string
+  pattern_type: string
+  formal_statement: string
+  confidence: number
+  experiment_id: string
+  observed_value: string
+}
+
+export interface CrossRoleDiffStructural {
+  endpoint_path: string; diff_type: 'STRUCTURAL'; role_a: string; role_b: string; confidence: number
+  details: { extra_in_a: string[]; extra_in_b: string[]; sensitive_leaked: string[] }
+}
+export interface CrossRoleDiffValue {
+  endpoint_path: string; diff_type: 'VALUE'; role_a: string; role_b: string; confidence: number
+  details: { masked_fields: Record<string, { a: string; b: string }> }
+}
+export interface CrossRoleDiffIdentity {
+  endpoint_path: string; diff_type: 'IDENTITY'; role_a: string; role_b: string; confidence: number
+  details: { mismatches: Record<string, { a: string; b: string }> }
+}
+export type CrossRoleDiff = CrossRoleDiffStructural | CrossRoleDiffValue | CrossRoleDiffIdentity
+
+export interface TemporalAnomaly {
+  endpoint_path: string
+  timing_ms: number
+  baseline_p95: number
+  threshold: number
+  escalation_level: 0 | 1 | 2
+  suggested_delay: number
+  hypothesis_id: string
+}
+
+export interface WafSignature {
+  endpoint: string
+  waf_type: 'cloudflare' | 'aws_waf' | 'modsecurity' | 'f5_asm' | 'unknown'
+  bypass_strategies: string[]
+  hypothesis_id: string
+}
+
+export interface PayloadAdaptedBlocked  { signal_type: 'BLOCKED';          adaptation: 'waf_bypass';          endpoint: string; waf_type: string; strategies: { name: string; transform: string }[]; hypothesis_id: string }
+export interface PayloadAdaptedError    { signal_type: 'ERROR';            adaptation: 'error_refinement';    endpoint: string; db_hints: Record<string, string>; hypothesis_id: string }
+export interface PayloadAdaptedTiming   { signal_type: 'TIMING_ANOMALY';   adaptation: 'timing_escalation';   endpoint: string; timing_ms: number; baseline_ms: number; hypothesis_id: string }
+export interface PayloadAdaptedField    { signal_type: 'UNEXPECTED_FIELD'; adaptation: 'field_investigation'; endpoint: string; hypothesis_id: string }
+export type PayloadAdapted = PayloadAdaptedBlocked | PayloadAdaptedError | PayloadAdaptedTiming | PayloadAdaptedField
+
+export interface GoalReached {
+  goal_type: string
+  plan_steps: number
+  total_cost: number
+}
+
+export interface PreconditionMissing {
+  finding_id: string
+  missing: Record<string, string[]>
+  endpoint: string
 }

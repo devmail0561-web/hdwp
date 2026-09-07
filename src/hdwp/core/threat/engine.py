@@ -3,12 +3,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 import structlog
-from typing import Any, Callable, TYPE_CHECKING
 
 from hdwp.core.bus.events import (
     FLOW_UPDATED,
-    HDWPEvent,
     MODEL_UPDATED,
     THREAT_MODEL_UPDATED,
 )
@@ -17,6 +18,7 @@ from hdwp.core.threat.scorer import AttackSurfaceScorer
 
 if TYPE_CHECKING:
     from hdwp.core.bus.event_bus import AsyncEventBus
+    from hdwp.core.bus.events import HDWPEvent
     from hdwp.core.model.schemas import ApplicationModelData, DataFlowMap
 
 logger = structlog.get_logger()
@@ -59,14 +61,14 @@ class ThreatModelEngine:
             self._scores = scores
             self._classifications = {k: v.value for k, v in classifications.items()}
 
-            await self._bus.emit(HDWPEvent(
-                type=THREAT_MODEL_UPDATED,
-                source="threat_model_engine",
-                payload={
+            await self._bus.emit(
+                THREAT_MODEL_UPDATED,
+                {
                     "scores": self._scores,
                     "classifications": self._classifications,
                 },
-            ))
+                source="threat_model_engine",
+            )
             logger.info(
                 "threat_model.updated",
                 n_endpoints=len(scores),

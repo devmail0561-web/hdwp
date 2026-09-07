@@ -3,16 +3,16 @@
 
 from __future__ import annotations
 
-import structlog
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hdwp.core.bus.events import HDWPEvent, INVARIANT_VIOLATED
+import structlog
+
+from hdwp.core.bus.events import INVARIANT_VIOLATED
 
 if TYPE_CHECKING:
     from hdwp.core.bus.event_bus import AsyncEventBus
-    from hdwp.core.model.schemas import ExperimentResult
 
 logger = structlog.get_logger()
 
@@ -126,10 +126,9 @@ class InvariantStore:
         )
 
         if self._bus:
-            await self._bus.emit(HDWPEvent(
-                type=INVARIANT_VIOLATED,
-                source="invariant_store",
-                payload={
+            await self._bus.emit(
+                INVARIANT_VIOLATED,
+                {
                     "endpoint_path": endpoint_path,
                     "pattern_type": pattern_type,
                     "formal_statement": inv.formal_statement,
@@ -137,7 +136,8 @@ class InvariantStore:
                     "experiment_id": experiment_id,
                     "observed_value": str(observed_value),
                 },
-            ))
+                source="invariant_store",
+            )
             logger.info(
                 "invariant.violated",
                 endpoint=endpoint_path,

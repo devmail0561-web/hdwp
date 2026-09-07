@@ -18,3 +18,13 @@ htmlcov/
 # React frontend
 src/hdwp/app/node_modules/
 src/hdwp/app/dist/
+
+# Fichiers dev-only (plans, audits, configs perso, logs)
+docs/PLAN_*.md
+docs/HDWP_v3_Architecture.md
+docs/hdwp_tui_dashboard.html
+docs/pentest_tui_dashboard.html
+AUDIT_*.md
+error.txt
+mon-pentest.yaml
+*-pentest.yaml

@@ -6,6 +6,50 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
+## [3.0.0] — 2026-09-07 — V3 : Reasoning Engine, UI Intel, bugfixes proxy
+
+### V3 Sprint 1 — Reasoning Foundation
+
+**Ajoutés**
+- `ThreatModelEngine` (`core/threat/engine.py`) : score de menace dynamique par endpoint — `AssetRegistry` + `AttackSurfaceScorer`, émet `threat.model.updated`
+- `InvariantStore` (`core/model/invariant_store.py`) : apprentissage inductif des invariants d'endpoint (owner_id_match, status_code_stable, field_presence), émet `invariant.violated`
+- `ContextualHypothesisEngine` (`core/reasoning/layer.py`) : remplace `HypothesisEngine` — génère des specs contextuelles selon profondeur stratégique (SHALLOW/MEDIUM/DEEP), intègre `threat_model_accessor` et `invariant_store`
+- `AttackGraphPlanner` (`core/attack_graph/planner.py`) : planificateur A* multi-étapes sur `AttackState`, émet `goal.reached`
+- `PreconditionSolver` (`core/attack_graph/precondition_solver.py`) : vérifie/résout les préconditions d'une transition, émet `precondition.missing`
+- `AttackState`, `StateEffects`, `AttackTransition` (`core/attack_graph/state.py`) : modèle d'état d'attaque (assets lisibles/éditables, credentials, privileges)
+- 9 nouveaux types d'events v3 dans `core/bus/events.py` : `threat.model.updated`, `invariant.violated`, `crossrole.diff.confirmed`, `temporal.anomaly.detected`, `payload.adapted`, `waf.signature.detected`, `attack.state.updated`, `goal.reached`, `precondition.missing`
+- `HDWPEngine._threat_engine` et `_invariant_store` exposés comme attributs d'instance
+
+### V3 Sprint 2 — Enriched Oracle
+
+**Ajoutés**
+- `CrossRoleDiffEngine` (`core/oracle/crossrole_diff.py`) : comparaison multi-rôles des réponses — 3 types de diff (STRUCTURAL, VALUE, IDENTITY), émet `crossrole.diff.confirmed`
+- `TemporalAnomalyDetector` (`core/oracle/temporal_detector.py`) : détection d'injection blind via timing — baseline p95 + seuil adaptatif, 3 niveaux d'escalade, émet `temporal.anomaly.detected`
+- `AdaptivePayloadEngine` (`core/experiment/adaptive_payload.py`) : classification des signaux d'expérience (BLOCKED/ERROR/TIMING_ANOMALY/UNEXPECTED_FIELD), sélection de stratégies WAF bypass, émet `payload.adapted` + `waf.signature.detected`
+- `WAFDialogEngine` (`core/experiment/waf_dialog.py`) : identification WAF (Cloudflare/AWS/ModSecurity/F5) + 11 stratégies de bypass
+- `EvidenceGraph` (`core/knowledge/evidence_graph.py`) : graphe en mémoire des relations entre findings (ENABLES/AMPLIFIES/REQUIRES), avec détection de cycles et recherche de chemins
+- `StructuralIndex` (`core/knowledge/structural_index.py`) : similarité cosinus sur signature structurelle (14 dimensions), apprentissage inter-sessions
+
+### UI v3 — Synchronisation interface
+
+**Ajoutés**
+- `src/hdwp/app/src/stores/v3Store.ts` : store Zustand pour toutes les collections v3 (listes bornées à 100 entrées par type)
+- `src/hdwp/app/src/components/IntelTab.tsx` : nouvel onglet `⬡ INTEL` — 6 sections temps réel (threats, invariant violations, crossrole diffs, temporal anomalies, WAF signatures, goals reached)
+- 8 handlers WebSocket dans `useWebSocket.ts` pour les events v3
+- Section `[ V3 INTEL ]` dans `MetricsPanel` : THREAT SCORE MAX, INVARIANT VIOLATIONS, WAF DETECTED
+- 8 interfaces TypeScript v3 dans `types/hdwp.ts` (unions discriminées pour `CrossRoleDiff` et `PayloadAdapted`)
+- `StateResponse` : 4 nouveaux champs v3 (`threat_score_max`, `invariant_violation_count`, `invariant_count`, `waf_detected`)
+- `state_route.py` : peuplement des champs v3 depuis `engine._threat_engine`, `engine._invariant_store`, `engine._adaptive_payload_engine`
+
+### Bugfixes proxy/exploit
+
+**Corrigés**
+- `core/http_client.py` : `_active_proxy` passe de `TOR_BROWSER_PROXY` à `None` par défaut — Tor uniquement si `tor_proxy` configuré dans le contexte ou `--proxy` CLI. L'ancienne valeur par défaut provoquait des échecs sur toutes les requêtes d'exploitation si Tor Browser n'était pas lancé
+- `server/routes/payload.py:_run_passive_confirm` : ajout d'un fallback proxy→direct — la re-vérification passive levait HTTP 500 immédiatement si Tor indisponible
+- `server/routes/exploit.py:_exploit_redirect` : même fallback proxy→direct ajouté — seul exploit à appeler `build_client()` directement sans filet de sécurité
+
+---
+
 ## [2.1.0] — 2026-09-06 — Détection d'anomalies inconnues, mutations enrichies, bugfixes oracle
 
 ### Détection de vulnérabilités inconnues (anomalies comportementales)

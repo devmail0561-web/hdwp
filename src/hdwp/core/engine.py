@@ -116,6 +116,8 @@ class HDWPEngine:
         self._prop_engine = prop_engine
         self._llm_layer = llm_layer
         self._adaptive_payload_engine: Any | None = None
+        self._threat_engine: Any | None = None
+        self._invariant_store: Any | None = None
 
         from hdwp.core.attack_graph.planner import AttackGraphPlanner
         self._chain_engine = AttackGraphPlanner(
@@ -347,6 +349,8 @@ class HDWPEngine:
             llm_layer=llm_layer,
         )
         engine._adaptive_payload_engine = adaptive_engine
+        engine._threat_engine = threat_engine
+        engine._invariant_store = invariant_store
 
         return engine
 

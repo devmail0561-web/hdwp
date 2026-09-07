@@ -24,6 +24,8 @@ interface ScanStore {
   authRequiredUrl: string | null
   techStack: string[]
   detectedVersions: Record<string, string>
+  invariantViolationCount: number
+  wafDetected: boolean
   setStatus(s: ScanStore['status']): void
   setPhase(p: string): void
   setSessionId(id: string): void
@@ -66,6 +68,8 @@ export const useScanStore = create<ScanStore>((set) => ({
   authRequiredUrl: null,
   techStack: [],
   detectedVersions: {},
+  invariantViolationCount: 0,
+  wafDetected: false,
   setStatus: (status) => set({ status }),
   setPhase: (phase) => set({ phase }),
   setSessionId: (sessionId) => set({ sessionId }),
@@ -89,6 +93,8 @@ export const useScanStore = create<ScanStore>((set) => ({
     errorMessage: s.error_message,
     techStack: s.tech_stack ?? [],
     detectedVersions: s.detected_versions ?? {},
+    invariantViolationCount: s.invariant_violation_count ?? 0,
+    wafDetected: s.waf_detected ?? false,
   }),
   setProxyActive: (proxyActive) => set({ proxyActive }),
   setIdsDetected: (idsDetected) => set({ idsDetected }),
@@ -108,6 +114,7 @@ export const useScanStore = create<ScanStore>((set) => ({
     propertyCount: 0, experimentCount: 0, ambiguousCount: 0, errorMessage: '',
     endpoints: [], events: [], proxyActive: false, idsDetected: false,
     authRequiredUrl: null, techStack: [], detectedVersions: {},
+    invariantViolationCount: 0, wafDetected: false,
   }),
   clearMetrics: () => set({
     phase: 'IDLE', modelConfidence: 0,
@@ -115,5 +122,6 @@ export const useScanStore = create<ScanStore>((set) => ({
     propertyCount: 0, experimentCount: 0, ambiguousCount: 0, errorMessage: '',
     endpoints: [], events: [], proxyActive: false, idsDetected: false,
     authRequiredUrl: null, techStack: [], detectedVersions: {},
+    invariantViolationCount: 0, wafDetected: false,
   }),
 }))

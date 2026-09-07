@@ -9,9 +9,11 @@ import { ExploitTab } from './components/ExploitTab'
 import { PayloadTab } from './components/PayloadTab'
 import { PluginsTab } from './components/PluginsTab'
 import { SettingsTab } from './components/SettingsTab'
+import { IntelTab } from './components/IntelTab'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useLLMStore } from './stores/llmStore'
 import { useScanStore } from './stores/scanStore'
+import { useV3Store } from './stores/v3Store'
 
 const SESSION_KEY = 'hdwp_active_session'
 
@@ -104,6 +106,7 @@ export function App() {
     }
     clearSession()
     useScanStore.getState().reset()
+    useV3Store.getState().reset()
     setActiveTab('scan')
   }
 
@@ -130,6 +133,7 @@ export function App() {
           {activeTab === 'scan'     && <ScanTab />}
           {activeTab === 'findings' && <FindingsTab />}
           {activeTab === 'flow'     && <FlowTab />}
+          {activeTab === 'intel'    && <IntelTab />}
           {activeTab === 'report'   && <ReportTab />}
           {activeTab === 'payload'  && <PayloadTab />}
           {activeTab === 'exploit'  && <ExploitTab />}

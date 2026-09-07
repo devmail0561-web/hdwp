@@ -29,7 +29,11 @@ class _StubBus:
     def on(self, event_type: str, handler: Callable[..., Any]) -> None:
         self._handlers[event_type].append(handler)
 
-    async def emit(self, event: HDWPEvent) -> None:
+    async def emit(self, event_or_type: Any, payload: Any = None, source: str = "") -> None:
+        if isinstance(event_or_type, HDWPEvent):
+            event = event_or_type
+        else:
+            event = HDWPEvent(type=event_or_type, source=source, payload=payload)
         for h in self._handlers.get(event.type, []):
             result = h(event)
             if inspect.isawaitable(result):

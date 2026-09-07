@@ -20,8 +20,11 @@ log = structlog.get_logger()
 # socks5h:// = résolution DNS via le proxy (évite les fuites DNS).
 TOR_BROWSER_PROXY = "socks5h://127.0.0.1:9150"
 
-# Proxy actif pour toute la session — modifiable via configure()
-_active_proxy: str | None = TOR_BROWSER_PROXY
+# Proxy actif pour toute la session — modifiable via configure().
+# Par défaut None (connexion directe) : le moteur appelle configure(tor_proxy) au démarrage
+# si tor_proxy est défini dans le contexte ou passé via --proxy.
+# Laisser TOR_BROWSER_PROXY comme défaut provoque des échecs silencieux si Tor n'est pas lancé.
+_active_proxy: str | None = None
 
 
 def configure(proxy_url: str | None) -> None:

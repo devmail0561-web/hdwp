@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
-import structlog
 from collections import defaultdict
+from collections.abc import Callable
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from hdwp.core.bus.events import (
     CROSSROLE_DIFF_CONFIRMED,
@@ -28,7 +30,7 @@ class DiffType(str, Enum):
 
 
 class CrossRoleDiffResult:
-    __slots__ = ("endpoint_path", "diff_type", "details", "confidence")
+    __slots__ = ("confidence", "details", "diff_type", "endpoint_path")
 
     def __init__(
         self,
@@ -100,10 +102,9 @@ class CrossRoleDiffEngine:
                     continue
                 diffs = self._compare(endpoint_path, role_a, bodies_a[-1], role_b, bodies_b[-1])
                 for diff in diffs:
-                    await self._bus.emit(HDWPEvent(
-                        type=CROSSROLE_DIFF_CONFIRMED,
-                        source="crossrole_diff_engine",
-                        payload={
+                    await self._bus.emit(
+                        CROSSROLE_DIFF_CONFIRMED,
+                        {
                             "endpoint_path": diff.endpoint_path,
                             "diff_type": diff.diff_type.value,
                             "role_a": role_a,
@@ -111,7 +112,8 @@ class CrossRoleDiffEngine:
                             "confidence": diff.confidence,
                             "details": diff.details,
                         },
-                    ))
+                        source="crossrole_diff_engine",
+                    )
 
     def _compare(
         self,

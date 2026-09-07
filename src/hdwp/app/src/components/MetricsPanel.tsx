@@ -1,6 +1,7 @@
 import { useFindingsStore } from '../stores/findingsStore'
 import { useScanStore } from '../stores/scanStore'
 import { useLLMStore } from '../stores/llmStore'
+import { useV3Store } from '../stores/v3Store'
 
 function MetricBlock({ label, value, color, pct }: {
   label: string; value: string | number; color: string; pct: number
@@ -21,9 +22,10 @@ const SEV_COLORS: Record<string, string> = {
 }
 
 export function MetricsPanel() {
-  const { findingsCount, endpointCount, hypothesisCount } = useScanStore()
+  const { findingsCount, endpointCount, hypothesisCount, invariantViolationCount, wafDetected } = useScanStore()
   const { findings } = useFindingsStore()
   const { active: llmActive, model } = useLLMStore()
+  const { threatScoreMax } = useV3Store()
 
   const avgConf = findings.length
     ? Math.round(findings.reduce((s, f) => s + f.confidence, 0) / findings.length * 100)
@@ -42,6 +44,13 @@ export function MetricsPanel() {
       <MetricBlock label="VIOLATIONS ORACLE" value={findingsCount} color="#ff0066" pct={Math.min(findingsCount * 10, 100)} />
       <MetricBlock label="COVERAGE ENDPOINTS" value={endpointCount} color="#00ccff" pct={Math.min(endpointCount * 5, 100)} />
       <MetricBlock label="HYPOTHÈSES" value={hypothesisCount} color="#ffaa00" pct={Math.min(hypothesisCount * 8, 100)} />
+
+      <div style={{ fontFamily: 'var(--font-title)', fontSize: 9, color: 'var(--green-dim)', letterSpacing: 2, padding: '7px 10px 5px', borderBottom: '1px solid var(--border)', background: '#060606' }}>
+        <span style={{ color: 'var(--green)' }}>[ </span>V3 INTEL<span style={{ color: 'var(--green)' }}> ]</span>
+      </div>
+      <MetricBlock label="THREAT SCORE MAX"     value={threatScoreMax.toFixed(2)}       color="#ff6600" pct={Math.min(Math.round(threatScoreMax * 100), 100)} />
+      <MetricBlock label="INVARIANT VIOLATIONS" value={invariantViolationCount}          color="#ffaa00" pct={Math.min(invariantViolationCount * 10, 100)} />
+      <MetricBlock label="WAF DETECTED"         value={wafDetected ? 'YES' : 'NO'}       color={wafDetected ? '#ff0066' : '#445566'} pct={wafDetected ? 100 : 0} />
 
       <div style={{ fontFamily: 'var(--font-title)', fontSize: 9, color: 'var(--green-dim)', letterSpacing: 2, padding: '7px 10px 5px', borderBottom: '1px solid var(--border)', background: '#060606' }}>
         <span style={{ color: 'var(--green)' }}>[ </span>DETAIL FINDINGS<span style={{ color: 'var(--green)' }}> ]</span>

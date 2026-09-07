@@ -28,7 +28,14 @@ Les classifications OWASP/CWE sont appliquées *a posteriori* sur les findings �
 - **Boucle de feedback** — findings confirmés → nouvelles hypothèses d'approfondissement automatiques
 - **Couverture multi-méthodes** — sonde POST/PUT/PATCH sur chaque endpoint GET découvert
 - **Oracle comportemental** — compare baseline vs mutation avec `data_identity_score` (pas seulement les patterns)
-- **Tor par défaut** — tout le trafic passe par `socks5h://127.0.0.1:9150`
+- **Threat scoring** — `ThreatModelEngine` calcule un score de menace dynamique par endpoint (AssetRegistry + AttackSurfaceScorer)
+- **Invariant learning** — `InvariantStore` apprend inductivement les invariants d'endpoint et détecte les violations
+- **CrossRole diff** — `CrossRoleDiffEngine` compare les réponses inter-rôles (STRUCTURAL/VALUE/IDENTITY)
+- **Temporal anomaly** — `TemporalAnomalyDetector` détecte l'injection blind via timing (baseline p95 + escalade)
+- **Adaptive WAF bypass** — `AdaptivePayloadEngine` classe les signaux d'expérience et sélectionne les stratégies de bypass WAF
+- **Attack graph** — `AttackGraphPlanner` planifie des chaînes d'attaque multi-étapes via A* sur `AttackState`
+- **Onglet INTEL** — tableau de bord temps réel des signaux v3 dans l'interface web
+- **Tor opt-in** — connexion directe par défaut ; Tor activé via `tor_proxy` dans le contexte ou `--proxy` CLI
 - **SPA support** — crawl Playwright routé à travers le proxy MITM
 - **Proxy MITM intégré** — CA auto-généré, installation automatique navigateurs
 - **Adaptive learning** — poids adaptés par type de cible (API, CMS, SPA, GraphQL)
@@ -83,11 +90,16 @@ hdwp --context hdwp-context.yaml
 ```
 OBSERVE     → crawl GET + probe POST/PUT/PATCH + proxy MITM + OpenAPI seed
 MODEL       → EndpointNode, ParameterNode (semantic), DataObjectNode (sensitivity)
+              + ThreatModelEngine (score/classification par endpoint)
+              + InvariantStore (apprentissage inductif des invariants)
 INFER       → SecurityProperty depuis le graphe sémantique (34 modules)
-HYPOTHESIZE → Hypothèses falsifiables par (endpoint × mutation × param)
+HYPOTHESIZE → ContextualHypothesisEngine (profondeur SHALLOW/MEDIUM/DEEP selon threat score)
 EXPERIMENT  → baseline + mutation (méthode réelle du corpus)
+              + AdaptivePayloadEngine (WAF detection + bypass strategy)
 ORACLE      → SemanticDiff + data_identity_score + anomaly detection (Z-score, size ratio, entropy)
-CHAIN       → Corrélation multi-findings (BOLA+SQLi, CORS+XSS…)
+              + CrossRoleDiffEngine (STRUCTURAL/VALUE/IDENTITY)
+              + TemporalAnomalyDetector (blind injection via timing)
+CHAIN       → AttackGraphPlanner (A* multi-étapes sur AttackState) + corrélations multi-findings
 REPORT      → Findings avec impact, scénarios d'attaque, remédiations
 ```
 

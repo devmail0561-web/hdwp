@@ -21,6 +21,11 @@ class StateResponse(BaseModel):
     tech_stack: list[str] = []
     detected_versions: dict[str, str] = {}
     detected_content_types: list[str] = []
+    # V3 intelligence fields
+    threat_score_max: float = 0.0
+    invariant_violation_count: int = 0
+    invariant_count: int = 0
+    waf_detected: bool = False
 
 
 class LLMStatusResponse(BaseModel):

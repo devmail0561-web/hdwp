@@ -4,15 +4,16 @@
 from __future__ import annotations
 
 import math
-import structlog
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import structlog
+
 from hdwp.core.bus.events import (
     EXPERIMENT_RESULT,
-    HDWPEvent,
     TEMPORAL_ANOMALY_DETECTED,
+    HDWPEvent,
 )
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ class TimingBaseline:
         if not self.samples:
             return 0.0
         sorted_s = sorted(self.samples)
-        idx = int(math.ceil(0.95 * len(sorted_s))) - 1
+        idx = math.ceil(0.95 * len(sorted_s)) - 1
         return sorted_s[max(0, idx)]
 
     def add(self, timing_ms: float) -> None:
@@ -121,10 +122,9 @@ class TemporalAnomalyDetector:
                 hypothesis_id=hypothesis_id,
             )
 
-            await self._bus.emit(HDWPEvent(
-                type=TEMPORAL_ANOMALY_DETECTED,
-                source="temporal_anomaly_detector",
-                payload={
+            await self._bus.emit(
+                TEMPORAL_ANOMALY_DETECTED,
+                {
                     "endpoint_path": anomaly.endpoint_path,
                     "timing_ms": anomaly.timing_ms,
                     "baseline_p95": round(anomaly.baseline_p95, 2),
@@ -133,7 +133,8 @@ class TemporalAnomalyDetector:
                     "suggested_delay": ESCALATION_DELAYS[escalation],
                     "hypothesis_id": anomaly.hypothesis_id,
                 },
-            ))
+                source="temporal_anomaly_detector",
+            )
             logger.info(
                 "temporal.anomaly_detected",
                 endpoint=endpoint,
