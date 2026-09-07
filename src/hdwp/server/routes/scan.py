@@ -105,11 +105,12 @@ async def start_scan(request: Request) -> ScanStatusResponse:
             session.phase = "DONE"
             session.set_status("done")
 
-            from hdwp.core.bus.events import SCAN_COMPLETED, HDWPEvent
-            await session.bus.emit(SCAN_COMPLETED, HDWPEvent(
-                type=SCAN_COMPLETED, source="engine",
+            from hdwp.core.bus.events import SCAN_COMPLETED
+            await session.bus.emit(
+                SCAN_COMPLETED,
                 payload={"findings_count": len(findings)},
-            ))
+                source="engine",
+            )
 
             await engine.close()
         except Exception as exc:
@@ -118,11 +119,12 @@ async def start_scan(request: Request) -> ScanStatusResponse:
             session.phase = "ERROR"
             session.set_status("error")
 
-            from hdwp.core.bus.events import SCAN_ERROR, HDWPEvent as _Evt
-            await session.bus.emit(SCAN_ERROR, _Evt(
-                type=SCAN_ERROR, source="engine",
+            from hdwp.core.bus.events import SCAN_ERROR
+            await session.bus.emit(
+                SCAN_ERROR,
                 payload={"error": str(exc)},
-            ))
+                source="engine",
+            )
             if session.engine:
                 try:
                     await session.engine.close()

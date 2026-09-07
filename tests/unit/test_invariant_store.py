@@ -21,11 +21,12 @@ class _StubBus:
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable[..., Any]]] = defaultdict(list)
 
-    def on(self, event_type: str, handler: Callable[..., Any]) -> None:
+    def on(self, event_type: str, handler: Callable[..., Any], *, mode: str = "batch") -> None:
         self._handlers[event_type].append(handler)
 
-    async def emit(self, event: HDWPEvent) -> None:
-        for h in self._handlers.get(event.type, []):
+    async def emit(self, event_type: str, payload: Any = None, source: str = "") -> None:
+        event = HDWPEvent(type=event_type, source=source, payload=payload)
+        for h in self._handlers.get(event_type, []):
             h(event)
 
     async def drain(self) -> None:

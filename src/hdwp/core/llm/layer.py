@@ -36,6 +36,22 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 
+def _extract_text_from_anthropic_response(resp, default: str = "") -> str:
+    """Helper to safely extract text from Anthropic API response."""
+    if not resp.content or len(resp.content) == 0:
+        log.warning("llm.empty_response_from_anthropic")
+        return default
+    return resp.content[0].text.strip()
+
+
+def _extract_text_from_openai_response(resp, default: str = "") -> str:
+    """Helper to safely extract text from OpenAI-compatible API response."""
+    if not resp.choices or len(resp.choices) == 0:
+        log.warning("llm.empty_response_from_openai")
+        return default
+    return (resp.choices[0].message.content or default).strip()
+
+
 class LLMLayerProtocol(ABC):
     """Interface abstraite pour la couche LLM."""
 
@@ -111,6 +127,45 @@ class LLMLayerProtocol(ABC):
         V3: Propose des invariants candidats depuis le modèle et le corpus de réponses.
         Les propositions sont soumises à InvariantStore pour validation déterministe (ADR-002).
         Retourne une liste d'énoncés formels. Retourne [] en cas d'erreur.
+        """
+        ...
+
+    @abstractmethod
+    async def infer_payload_context(
+        self,
+        endpoint: str,
+        params: list[dict],
+        tech_stack: list[str],
+        mutation_type: str,
+    ) -> dict:
+        """
+        V3: Suggest contextual payloads for a given endpoint/mutation.
+        ADR-002: informational only, not used as evidence.
+        Returns {"suggestions": list[str], "rationale": str}. Returns empty on error.
+        """
+        ...
+
+    @abstractmethod
+    async def generate_attack_narrative(
+        self,
+        chain: list[dict],
+        findings: list[dict],
+    ) -> str:
+        """
+        V3: Generate a multi-step attack narrative for reporting.
+        ADR-002: informational only. Returns "" on error.
+        """
+        ...
+
+    @abstractmethod
+    async def analyze_preconditions(
+        self,
+        hypothesis: dict,
+        model: dict,
+    ) -> list[str]:
+        """
+        V3: Identify preconditions for a hypothesis.
+        ADR-002: informational only. Returns [] on error.
         """
         ...
 
@@ -328,6 +383,99 @@ class AnthropicLLMLayer(LLMLayerProtocol):
             log.warning("llm.propose_invariants_failed", error=str(exc))
             return []
 
+    async def infer_payload_context(
+        self,
+        endpoint: str,
+        params: list[dict],
+        tech_stack: list[str],
+        mutation_type: str,
+    ) -> dict:
+        params_desc = ", ".join(f"{p.get('name', '?')} ({p.get('type', 'string')})" for p in params[:8])
+        prompt = (
+            "You are a security researcher suggesting contextual payloads. "
+            "ADR-002: this output is INFORMATIONAL ONLY — never used as evidence.\n\n"
+            f"Endpoint: {endpoint}\n"
+            f"Parameters: {params_desc}\n"
+            f"Tech stack: {tech_stack}\n"
+            f"Mutation type: {mutation_type}\n\n"
+            "Suggest 3-5 targeted payloads and a one-sentence rationale. "
+            'Format: {"suggestions": ["..."], "rationale": "..."}'
+        )
+        try:
+            import json as _json
+            resp = await self._client.messages.create(
+                model=self._model, max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if not resp.content or len(resp.content) == 0:
+                log.warning("llm.infer_payload_context_empty_response")
+                return {"suggestions": [], "rationale": ""}
+
+            raw = resp.content[0].text.strip()
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                return _json.loads(raw[start:end])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.infer_payload_context_failed", error=str(exc))
+        return {"suggestions": [], "rationale": ""}
+
+    async def generate_attack_narrative(
+        self, chain: list[dict], findings: list[dict],
+    ) -> str:
+        chain_desc = "\n".join(
+            f"Step {s.get('step', i)}: {s.get('url', '?')} → {s.get('status_code', '?')}"
+            for i, s in enumerate(chain)
+        )
+        findings_desc = "\n".join(
+            f"- {f.get('owasp_category', '?')}/{f.get('cwe_id', '?')} on {f.get('affected_endpoints', ['?'])[0] if f.get('affected_endpoints') else '?'}"
+            for f in findings[:5]
+        )
+        prompt = (
+            "You are a security consultant writing an attack narrative for a pentest report. "
+            "ADR-002: INFORMATIONAL ONLY.\n\n"
+            f"Attack chain:\n{chain_desc}\n\nFindings involved:\n{findings_desc}\n\n"
+            "Write a 3-5 sentence narrative explaining how these findings chain together "
+            "into a multi-step attack. Professional tone, suitable for a CISO audience."
+        )
+        try:
+            resp = await self._client.messages.create(
+                model=self._model, max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return resp.content[0].text.strip()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.attack_narrative_failed", error=str(exc))
+            return ""
+
+    async def analyze_preconditions(
+        self, hypothesis: dict, model: dict,
+    ) -> list[str]:
+        prompt = (
+            "You are a security researcher analyzing preconditions for a security hypothesis. "
+            "ADR-002: INFORMATIONAL ONLY.\n\n"
+            f"Hypothesis: {hypothesis.get('statement', '?')}\n"
+            f"Endpoint count: {len(model.get('endpoints', []))}\n"
+            f"Roles: {[r.get('name') for r in model.get('roles', [])]}\n\n"
+            "List 1-3 preconditions needed to test this hypothesis. "
+            "One per line, starting with '- '."
+        )
+        try:
+            resp = await self._client.messages.create(
+                model=self._model, max_tokens=200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if not resp.content or len(resp.content) == 0:
+                log.warning("llm.analyze_preconditions_empty_response")
+                return []
+
+            lines = resp.content[0].text.strip().split("\n")
+            # Use removeprefix to avoid stripping all '-' and space chars from left
+            return [ln.removeprefix("- ").strip() for ln in lines if ln.strip().startswith("-")][:3]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.analyze_preconditions_failed", error=str(exc))
+            return []
+
 
 class OpenAICompatibleLLMLayer(LLMLayerProtocol):
     """
@@ -510,6 +658,85 @@ class OpenAICompatibleLLMLayer(LLMLayerProtocol):
             return [ln.lstrip("- ").strip() for ln in lines if ln.strip() and not ln.startswith("#")][:5]
         except Exception as exc:  # noqa: BLE001
             log.warning("llm.propose_invariants_failed", error=str(exc))
+            return []
+
+    async def infer_payload_context(
+        self,
+        endpoint: str,
+        params: list[dict],
+        tech_stack: list[str],
+        mutation_type: str,
+    ) -> dict:
+        params_desc = ", ".join(f"{p.get('name', '?')} ({p.get('type', 'string')})" for p in params[:8])
+        prompt = (
+            "Security researcher: suggest contextual payloads. "
+            "ADR-002: INFORMATIONAL ONLY.\n\n"
+            f"Endpoint: {endpoint}\nParameters: {params_desc}\n"
+            f"Tech stack: {tech_stack}\nMutation type: {mutation_type}\n\n"
+            "Suggest 3-5 targeted payloads and rationale. "
+            'Format: {"suggestions": ["..."], "rationale": "..."}'
+        )
+        try:
+            import json as _json
+            resp = await self._client.chat.completions.create(
+                model=self._model, max_tokens=300,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                return _json.loads(raw[start:end])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.infer_payload_context_failed", error=str(exc))
+        return {"suggestions": [], "rationale": ""}
+
+    async def generate_attack_narrative(
+        self, chain: list[dict], findings: list[dict],
+    ) -> str:
+        chain_desc = "\n".join(
+            f"Step {s.get('step', i)}: {s.get('url', '?')} → {s.get('status_code', '?')}"
+            for i, s in enumerate(chain)
+        )
+        findings_desc = "\n".join(
+            f"- {f.get('owasp_category', '?')}/{f.get('cwe_id', '?')}"
+            for f in findings[:5]
+        )
+        prompt = (
+            "Security consultant: write a 3-5 sentence attack narrative. "
+            "ADR-002: INFORMATIONAL ONLY.\n\n"
+            f"Chain:\n{chain_desc}\n\nFindings:\n{findings_desc}\n\n"
+            "Professional tone for a CISO audience."
+        )
+        try:
+            resp = await self._client.chat.completions.create(
+                model=self._model, max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return (resp.choices[0].message.content or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.attack_narrative_failed", error=str(exc))
+            return ""
+
+    async def analyze_preconditions(
+        self, hypothesis: dict, model: dict,
+    ) -> list[str]:
+        prompt = (
+            "Security researcher: list 1-3 preconditions for this hypothesis. "
+            "ADR-002: INFORMATIONAL ONLY.\n\n"
+            f"Hypothesis: {hypothesis.get('statement', '?')}\n"
+            f"Roles: {[r.get('name') for r in model.get('roles', [])]}\n\n"
+            "One per line, starting with '- '."
+        )
+        try:
+            resp = await self._client.chat.completions.create(
+                model=self._model, max_tokens=200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            lines = (resp.choices[0].message.content or "").strip().split("\n")
+            return [ln.lstrip("- ").strip() for ln in lines if ln.strip().startswith("-")][:3]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("llm.analyze_preconditions_failed", error=str(exc))
             return []
 
 

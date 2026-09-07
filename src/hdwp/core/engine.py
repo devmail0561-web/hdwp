@@ -31,7 +31,7 @@ from hdwp.core.context.scope_guard import ScopeGuard
 from hdwp.core.experiment.engine import ExperimentEngine
 from hdwp.core.experiment.rate_limiter import TokenBucket
 from hdwp.core.experiment.session_manager import SessionManager
-from hdwp.core.hypothesis.engine import HypothesisEngine
+from hdwp.core.reasoning.layer import ContextualHypothesisEngine
 from hdwp.core.model.application_model import ApplicationModel
 from hdwp.core.model.schemas import Finding
 from hdwp.core.observation.engine import ObservationEngine
@@ -92,7 +92,7 @@ class HDWPEngine:
         bus: AsyncEventBus,
         app_model: ApplicationModel,
         obs_engine: ObservationEngine,
-        hyp_engine: HypothesisEngine,
+        hyp_engine: ContextualHypothesisEngine,
         exp_engine: ExperimentEngine,
         oracle: SemanticOracle,
         session_manager: SessionManager,
@@ -115,14 +115,16 @@ class HDWPEngine:
         self._kb = knowledge_base
         self._prop_engine = prop_engine
         self._llm_layer = llm_layer
+        self._adaptive_payload_engine: Any | None = None
 
-        from hdwp.core.chain.engine import ChainEngine
-        self._chain_engine = ChainEngine(
+        from hdwp.core.attack_graph.planner import AttackGraphPlanner
+        self._chain_engine = AttackGraphPlanner(
             bus=bus,
             model_accessor=app_model.snapshot,
             flow_map_accessor=app_model.get_flow_map,
             repository=repository,
             target_url=context.base_url,
+            roles=context.config.roles,
             session_id=context.session_id,
         )
 
@@ -239,13 +241,15 @@ class HDWPEngine:
 
         inference_reg = InferenceRegistry.default_with_kb_stats(kb_stats)
         prop_engine = SecurityPropertyEngine(bus, plugin_registry=registry, inference_registry=inference_reg)
-        hyp_engine = HypothesisEngine(
+        hyp_engine = ContextualHypothesisEngine(
             bus,
             model_accessor=app_model.snapshot,
             plugin_registry=registry,
             repository=repository,
             prioritizer=prioritizer,
             llm_layer=llm_layer,
+            threat_model_accessor=lambda: threat_engine.scores,
+            invariant_store=invariant_store,
         )
         oracle = SemanticOracle(
             bus, repository, llm_layer=llm_layer,
@@ -284,6 +288,10 @@ class HDWPEngine:
         effective_proxy = proxy_url or context.config.options.tor_proxy
         _http_client.configure(effective_proxy)
 
+        # Validate required config attributes
+        if not hasattr(context.config, "roles") or context.config.roles is None:
+            raise ValueError("context.config.roles is required but missing or None")
+
         rate_limiter = TokenBucket.from_rpm(context.config.options.max_requests_per_minute)
         session_manager = SessionManager(context.config.roles, proxy_url=effective_proxy)
 
@@ -318,7 +326,12 @@ class HDWPEngine:
             max_concurrent=context.config.options.max_concurrent_experiments,
         )
 
-        return cls(
+        # V3 AdaptivePayloadEngine: real-time signal classification + WAF bypass
+        from hdwp.core.experiment.adaptive_payload import AdaptivePayloadEngine
+
+        adaptive_engine = AdaptivePayloadEngine(bus)
+
+        engine = cls(
             context=context,
             bus=bus,
             app_model=app_model,
@@ -333,6 +346,9 @@ class HDWPEngine:
             prop_engine=prop_engine,
             llm_layer=llm_layer,
         )
+        engine._adaptive_payload_engine = adaptive_engine
+
+        return engine
 
     @classmethod
     async def create(
