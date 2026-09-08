@@ -72,6 +72,10 @@ class OptionsConfig(BaseModel):
     # Proxy sortant — socks5h://127.0.0.1:9150 = Tor Browser par défaut.
     # Mettre à null pour connexion directe, ou une URL HTTP(S) pour un proxy MITM type Burp.
     tor_proxy: str | None = "socks5h://127.0.0.1:9150"
+    # Chaîne de fallback : proxies à essayer si tor_proxy est injoignable.
+    # Testés dans l'ordre au démarrage du moteur. null = connexion directe.
+    # Exemple : ["http://127.0.0.1:8080", null]
+    proxy_fallback: list[str | None] = []
     # Mode exploration continue : le moteur itère après la passe initiale tant que
     # de nouvelles hypothèses sont disponibles (pivots, confirmations, désambiguïsations).
     continuous: bool = False

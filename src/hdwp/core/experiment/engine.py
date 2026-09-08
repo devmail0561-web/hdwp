@@ -28,6 +28,7 @@ from hdwp.core.bus.event_bus import AsyncEventBus
 from hdwp.core.bus.events import (
     EXPERIMENT_RESULT,
     HYPOTHESIS_EXPERIMENTS_READY,
+    HYPOTHESIS_STATUS_CHANGED,
 )
 from hdwp.core.context.scope_guard import ScopeGuard, ScopeVerdict
 from hdwp.core.experiment.mutation_module import MutationModule
@@ -303,6 +304,11 @@ class ExperimentEngine:
             )
         else:
             log.warning("experiment.all_baselines_invalid", hypothesis_id=hyp.id)
+            await self._bus.emit(
+                HYPOTHESIS_STATUS_CHANGED,
+                {"id": hyp.id, "old_status": hyp.status.value, "new_status": "INSUFFICIENT_DATA"},
+                source="experiment_engine",
+            )
         self._results_buffer.pop(hyp.id, None)
 
     async def _execute(

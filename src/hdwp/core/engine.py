@@ -329,10 +329,12 @@ class HDWPEngine:
 
         obs_engine = ObservationEngine(bus, context, scope_guard, llm_layer=llm_layer, proxy_url=proxy_url)
 
-        # Configurer le proxy global pour tous les clients HTTP créés via http_client.build_client()
-        # proxy_url (CLI --proxy) prime sur tor_proxy (config file)
+        # Résoudre le proxy : tester la chaîne (primaire + fallbacks) et garder le premier
+        # qui peut joindre la cible. proxy_url (CLI --proxy) prime sur tor_proxy (config).
         from hdwp.core import http_client as _http_client
-        effective_proxy = proxy_url or context.config.options.tor_proxy
+        _primary = proxy_url or context.config.options.tor_proxy
+        _chain: list[str | None] = [_primary, *context.config.options.proxy_fallback]
+        effective_proxy = await _http_client.resolve_proxy(_chain, context.base_url)
         _http_client.configure(effective_proxy)
 
         # Validate required config attributes
@@ -505,6 +507,7 @@ class HDWPEngine:
         if pending_v1:
             await self._exp_engine.run_pending(pending_v1)
             await self._bus.drain()
+        _executed_ids = {h.id for h in pending_v1}
 
         # Phase 1b-bis : scan des versions de bibliothèques JS/CSS (OWASP A06:2021)
         try:
@@ -524,7 +527,7 @@ class HDWPEngine:
             log.warning("engine.version_scan_failed", error=str(exc))
 
         # Phase 2 vague 2 : nouvelles hypothèses générées par le version scan ou l'auto-registration.
-        pending_v2 = self._hyp_engine.get_pending()
+        pending_v2 = [h for h in self._hyp_engine.get_pending() if h.id not in _executed_ids]
         if _ml is not None:
             pending_v2 = _ml.sort_hypotheses(pending_v2, self._app_model.snapshot())
         log.info("engine.experiments_v2", count=len(pending_v2))
@@ -536,8 +539,11 @@ class HDWPEngine:
         # Phase 3 : chaînes d'attaque (si 2+ findings confirmés)
         if self._chain_engine.has_pending_chains():
             log.info("engine.chains_start")
-            await self._chain_engine.run_pending_chains(self._exp_engine)
-            await self._bus.drain()
+            try:
+                await self._chain_engine.run_pending_chains(self._exp_engine)
+                await self._bus.drain()
+            except Exception as exc:
+                log.warning("engine.chains_failed", error=str(exc))
 
         # ── Mode continu : itérations supplémentaires jusqu'à épuisement ou timeout ──
         if self._context.config.options.continuous:

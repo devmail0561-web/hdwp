@@ -77,3 +77,30 @@ def build_client(
             kwargs["verify"] = False
 
     return httpx.AsyncClient(**kwargs)
+
+
+async def probe_proxy(proxy_url: str | None, target_url: str, timeout: float = 4.0) -> bool:
+    """Teste si target_url est joignable via proxy_url. None = connexion directe."""
+    try:
+        client = build_client(proxy_url=proxy_url, timeout=timeout, follow_redirects=False)
+        async with client:
+            await client.head(target_url)
+        return True
+    except Exception:
+        return False
+
+
+async def resolve_proxy(proxy_chain: list[str | None], target_url: str) -> str | None:
+    """Retourne le premier proxy de la chaîne qui peut joindre target_url.
+
+    Parcourt proxy_chain dans l'ordre. None = connexion directe (toujours valide
+    si le réseau local est accessible). Logue le choix effectif.
+    """
+    for proxy in proxy_chain:
+        label = proxy or "direct"
+        if await probe_proxy(proxy, target_url):
+            log.info("http_client.proxy_resolved", selected=label, target=target_url)
+            return proxy
+        log.warning("http_client.proxy_unreachable", proxy=label, target=target_url)
+    log.error("http_client.all_proxies_failed", chain=[p or "direct" for p in proxy_chain])
+    return None

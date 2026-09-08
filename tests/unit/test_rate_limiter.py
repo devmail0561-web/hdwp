@@ -45,3 +45,13 @@ async def test_from_rpm():
     bucket = TokenBucket.from_rpm(60)
     assert bucket._rate == pytest.approx(1.0)
     await bucket.acquire()
+
+
+def test_from_rpm_zero_clamps_to_positive():
+    bucket = TokenBucket.from_rpm(0)
+    assert bucket._rate > 0
+
+
+def test_constructor_rejects_zero_rate():
+    with pytest.raises(ValueError, match="rate must be positive"):
+        TokenBucket(rate=0.0)

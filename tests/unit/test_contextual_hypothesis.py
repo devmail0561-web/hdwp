@@ -11,6 +11,7 @@ from hdwp.core.bus.events import (
     FINDING_REFUTED,
     HYPOTHESIS_AMBIGUOUS,
     HYPOTHESIS_GENERATED,
+    HYPOTHESIS_STATUS_CHANGED,
     PROPERTY_INFERRED,
     HDWPEvent,
 )
@@ -241,3 +242,98 @@ async def test_high_threat_score_generates_high_priority() -> None:
 
     assert len(collected) >= 1
     assert collected[0].payload["priority"] == "HIGH"
+
+
+# ── Hypothesis status sync (Bug 1 fix) ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_status_updated_on_hypothesis_status_changed() -> None:
+    bus = _make_bus()
+    engine = _make_engine(bus=bus)
+    h = Hypothesis(source_plugin="test", property_id="P1", statement="S1")
+    engine._hypotheses.append(h)
+    engine._seen_keys.add(("S1", "", ""))
+
+    assert len(engine.get_pending()) == 1
+
+    await bus.emit(
+        HYPOTHESIS_STATUS_CHANGED,
+        {"id": h.id, "old_status": "PENDING", "new_status": "CONFIRMED"},
+        source="test",
+    )
+    await bus.drain()
+
+    assert len(engine.get_pending()) == 0
+    assert h.status == HypothesisStatus.CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_status_changed_unknown_id_is_noop() -> None:
+    bus = _make_bus()
+    engine = _make_engine(bus=bus)
+    h = Hypothesis(source_plugin="test", property_id="P1", statement="S1")
+    engine._hypotheses.append(h)
+
+    await bus.emit(
+        HYPOTHESIS_STATUS_CHANGED,
+        {"id": "HYP-unknown", "old_status": "PENDING", "new_status": "CONFIRMED"},
+        source="test",
+    )
+    await bus.drain()
+
+    assert h.status == HypothesisStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_status_changed_invalid_status_is_noop() -> None:
+    bus = _make_bus()
+    engine = _make_engine(bus=bus)
+    h = Hypothesis(source_plugin="test", property_id="P1", statement="S1")
+    engine._hypotheses.append(h)
+
+    await bus.emit(
+        HYPOTHESIS_STATUS_CHANGED,
+        {"id": h.id, "old_status": "PENDING", "new_status": "BOGUS_STATUS"},
+        source="test",
+    )
+    await bus.drain()
+
+    assert h.status == HypothesisStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_all_resolved_returns_empty_pending() -> None:
+    bus = _make_bus()
+    engine = _make_engine(bus=bus)
+    h1 = Hypothesis(source_plugin="test", property_id="P1", statement="S1")
+    h2 = Hypothesis(source_plugin="test", property_id="P2", statement="S2")
+    engine._hypotheses.extend([h1, h2])
+
+    await bus.emit(
+        HYPOTHESIS_STATUS_CHANGED,
+        {"id": h1.id, "old_status": "PENDING", "new_status": "CONFIRMED"},
+        source="test",
+    )
+    await bus.emit(
+        HYPOTHESIS_STATUS_CHANGED,
+        {"id": h2.id, "old_status": "PENDING", "new_status": "REFUTED"},
+        source="test",
+    )
+    await bus.drain()
+
+    assert engine.get_pending() == []
+
+
+@pytest.mark.asyncio
+async def test_status_changed_non_dict_payload_is_noop() -> None:
+    bus = _make_bus()
+    engine = _make_engine(bus=bus)
+    h = Hypothesis(source_plugin="test", property_id="P1", statement="S1")
+    engine._hypotheses.append(h)
+    engine._seen_keys.add(("S1", "", ""))
+
+    await bus.emit(HYPOTHESIS_STATUS_CHANGED, None, source="test")  # type: ignore[arg-type]
+    await bus.drain()
+
+    assert h.status == HypothesisStatus.PENDING

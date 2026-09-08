@@ -41,6 +41,10 @@ options:
   allow_write: false
   max_requests_per_minute: 60
   language: "fr"
+  # Proxies de fallback si tor_proxy est injoignable (testés dans l'ordre au démarrage).
+  # proxy_fallback:
+  #   - "http://127.0.0.1:8080"  # mitmproxy HDWP
+  #   - null                      # connexion directe
   # Mode exploration continue — le moteur itère après la passe initiale
   # tant que de nouvelles hypothèses sont disponibles (pivots, confirmations).
   # continuous: true

@@ -27,6 +27,10 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
+_ASTAR_MAX_NODES = 2000   # noeuds explorés max — au-delà l'espace est trop grand
+_ASTAR_MAX_PATH  = 5      # longueur max d'une chaîne (évite les cycles profonds)
+_GOALS_MAX       = 3      # goals A* tentés par exécution (les plus faisables en premier)
+
 
 @dataclass(order=True)
 class _AStarNode:
@@ -105,9 +109,16 @@ class AttackGraphPlanner:
 
         open_set: list[_AStarNode] = [start]
         visited: set[frozenset] = set()
+        nodes_explored = 0
 
         while open_set:
+            if nodes_explored >= _ASTAR_MAX_NODES:
+                logger.warning("attack_graph.astar_budget_exceeded", goal=goal.goal_type.value,
+                               nodes=nodes_explored, transitions=len(self._transitions))
+                return None
+
             current = heapq.heappop(open_set)
+            nodes_explored += 1
 
             state_key = self._state_key(current.state)
             if state_key in visited:
@@ -123,6 +134,9 @@ class AttackGraphPlanner:
                 "session_tokens": current.state.session_tokens,
             }):
                 return current.path
+
+            if len(current.path) >= _ASTAR_MAX_PATH:
+                continue
 
             path_ids = {t.finding_id for t in current.path}
             for transition in self._transitions:
@@ -179,7 +193,14 @@ class AttackGraphPlanner:
         self._last_chained_count = len(self._confirmed_findings)
         executed_specs: list[ChainSpec] = []
 
-        for goal in self._goals:
+        # Trier les goals par faisabilité (moins de préconditions manquantes = en premier)
+        # et ne tenter que les _GOALS_MAX plus accessibles pour éviter l'explosion.
+        initial_state = AttackState()
+        sorted_goals = sorted(
+            self._goals, key=lambda g: initial_state.missing_for(g.required_state)
+        )[:_GOALS_MAX]
+
+        for goal in sorted_goals:
             plan = self.plan(goal=goal)
             if not plan:
                 continue

@@ -89,11 +89,28 @@ async def start_scan(request: Request) -> ScanStatusResponse:
             # Passer proxy_url=None : le crawl est direct, sans interception.
             proxy_url = None
 
-            # Handler : ouvrir le navigateur sur la cible quand auth requise
+            # Handler : ouvrir le navigateur (mode 1) ou attaquer (mode 2) quand auth requise.
+            # Chaque flag garantit un déclenchement unique par session.
             from hdwp.core.bus.events import AUTH_REQUIRED as _AUTH_REQ
 
+            _auth_browser_opened = False
+            _auth_attack_done = False
+
             async def _on_auth_required(event) -> None:
-                if session.proxy_active:
+                nonlocal _auth_browser_opened, _auth_attack_done
+                has_creds = any(
+                    r.credentials is not None
+                    for r in session.context.config.roles
+                )
+                if not has_creds and not _auth_attack_done:
+                    _auth_attack_done = True
+                    log.info("auth.attack_mode_triggered")
+                    from hdwp.core.observation.auth_attacker import AuthAttacker
+                    asyncio.create_task(
+                        AuthAttacker().try_attack(session.target_url, session.bus)
+                    )
+                elif has_creds and session.proxy_active and not _auth_browser_opened:
+                    _auth_browser_opened = True
                     import webbrowser
                     webbrowser.open(session.target_url)
                     log.info("auth_required.browser_opened", target=session.target_url)

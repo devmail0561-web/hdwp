@@ -8,7 +8,7 @@ import pytest
 import httpx
 
 from hdwp.core.bus.event_bus import AsyncEventBus
-from hdwp.core.bus.events import EXPERIMENT_RESULT, HYPOTHESIS_EXPERIMENTS_READY, HDWPEvent
+from hdwp.core.bus.events import EXPERIMENT_RESULT, HYPOTHESIS_EXPERIMENTS_READY, HYPOTHESIS_STATUS_CHANGED, HDWPEvent
 from hdwp.core.context.config_schema import CredentialConfig, OptionsConfig, RoleConfig, ScopeConfig, TargetConfig
 from hdwp.core.context.loader import EngineContext
 from hdwp.core.context.scope_guard import ScopeGuard
@@ -268,3 +268,78 @@ async def test_http_failure_returns_status_zero() -> None:
     for r in results:
         resp = r["response_received"]
         assert resp["status_code"] == 0
+
+
+@pytest.mark.asyncio
+async def test_all_baselines_404_emits_insufficient_data() -> None:
+    """When all baselines return 404, HYPOTHESIS_STATUS_CHANGED is emitted."""
+    bus = AsyncEventBus()
+    model, corpus = _build_model_and_corpus()
+    roles = _make_roles()
+
+    class _Always404Transport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, text="Not Found")
+
+    sm = SessionManager(roles)
+    for role in roles:
+        sm._clients[role.name] = httpx.AsyncClient(  # noqa: SLF001
+            transport=_Always404Transport(),
+            base_url="http://test",
+        )
+
+    ctx = _make_context()
+    engine = _make_engine(bus, ctx, sm, model, corpus)
+
+    status_events: list[HDWPEvent] = []
+    bus.on(HYPOTHESIS_STATUS_CHANGED, lambda e: status_events.append(e))
+
+    hyp, _ = _make_hypothesis_with_plans(model, corpus)
+    await engine.run_pending([hyp])
+    await bus.drain()
+
+    assert len(status_events) >= 1
+    assert status_events[0].payload["id"] == hyp.id
+    assert status_events[0].payload["new_status"] == "INSUFFICIENT_DATA"
+
+
+@pytest.mark.asyncio
+async def test_network_failure_emits_insufficient_data_and_experiment_result() -> None:
+    """Network failures (status=0) skip mutation but still emit EXPERIMENT_RESULT for
+    the baseline and HYPOTHESIS_STATUS_CHANGED(INSUFFICIENT_DATA) since baseline_id is never set."""
+    bus = AsyncEventBus()
+    model, corpus = _build_model_and_corpus()
+    roles = _make_roles()
+
+    class _FailTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("simulated failure")
+
+    sm = SessionManager(roles)
+    for role in roles:
+        sm._clients[role.name] = httpx.AsyncClient(  # noqa: SLF001
+            transport=_FailTransport(),
+            base_url="http://test",
+        )
+
+    ctx = _make_context()
+    engine = _make_engine(bus, ctx, sm, model, corpus)
+
+    status_events: list[HDWPEvent] = []
+    experiment_results: list[HDWPEvent] = []
+    ready_events: list[HDWPEvent] = []
+    bus.on(HYPOTHESIS_STATUS_CHANGED, lambda e: status_events.append(e))
+    bus.on(EXPERIMENT_RESULT, lambda e: experiment_results.append(e))
+    bus.on(HYPOTHESIS_EXPERIMENTS_READY, lambda e: ready_events.append(e))
+
+    hyp, _ = _make_hypothesis_with_plans(model, corpus)
+    await engine.run_pending([hyp])
+    await bus.drain()
+
+    # status=0 baselines: EXPERIMENT_RESULT emitted but baseline_id never assigned
+    assert len(experiment_results) >= 1
+    assert all(r.payload["response_received"]["status_code"] == 0 for r in experiment_results)
+    # No valid baseline → INSUFFICIENT_DATA, not EXPERIMENTS_READY
+    assert len(status_events) >= 1
+    assert status_events[0].payload["new_status"] == "INSUFFICIENT_DATA"
+    assert len(ready_events) == 0

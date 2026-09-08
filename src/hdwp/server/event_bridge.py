@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import time
+
 import structlog
 
 from hdwp.core.bus.event_bus import AsyncEventBus, HDWPEvent
@@ -10,6 +12,25 @@ from hdwp.core.bus.events import ALL_EVENT_TYPES
 from hdwp.server.ws_manager import WebSocketManager
 
 log = structlog.get_logger()
+
+_IMMEDIATE: frozenset[str] = frozenset({
+    "scan.completed",
+    "scan.error",
+    "auth.required",
+    "finding.confirmed",
+    "finding.refuted",
+})
+
+_THROTTLE_MS: dict[str, int] = {
+    "ml.feedback":              300,
+    "rl.transition":            300,
+    "experiment.result":        150,
+    "ml.oracle_verdict":        200,
+    "diff.computed":            150,
+    "ml.embedding_computed":    500,
+    "ml.vuln_predicted":        300,
+    "hypothesis.status_changed": 150,
+}
 
 
 class EventBridge:
@@ -19,16 +40,18 @@ class EventBridge:
         self._bus = bus
         self._ws_manager = ws_manager
         self._session_id = session_id
+        self._last_sent: dict[str, float] = {}
 
     def attach(self) -> None:
-        """Enregistre un handler async pour chaque type d'événement.
-
-        Inclut session_id dans chaque message pour permettre au frontend
-        d'ignorer les événements des sessions inactives.
-        """
         for event_type in ALL_EVENT_TYPES:
             async def _handler(event: HDWPEvent, et: str = event_type) -> None:
                 try:
+                    throttle = _THROTTLE_MS.get(et, 0)
+                    if throttle > 0 and et not in _IMMEDIATE:
+                        now = time.monotonic()
+                        if now - self._last_sent.get(et, 0.0) < throttle / 1000.0:
+                            return
+                        self._last_sent[et] = now
                     await self._ws_manager.broadcast({
                         "type": et,
                         "session_id": self._session_id,

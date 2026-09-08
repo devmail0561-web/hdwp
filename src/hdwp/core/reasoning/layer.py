@@ -15,6 +15,7 @@ from hdwp.core.bus.events import (
     FINDING_REFUTED,
     HYPOTHESIS_AMBIGUOUS,
     HYPOTHESIS_GENERATED,
+    HYPOTHESIS_STATUS_CHANGED,
     PROPERTY_INFERRED,
     HDWPEvent,
 )
@@ -174,6 +175,7 @@ class ContextualHypothesisEngine:
         bus.on(FINDING_CONFIRMED, self._on_finding_confirmed)
         bus.on(FINDING_REFUTED, self._on_finding_refuted)
         bus.on(HYPOTHESIS_AMBIGUOUS, self._on_hypothesis_ambiguous)
+        bus.on(HYPOTHESIS_STATUS_CHANGED, self._on_hypothesis_status_changed)
 
     @property
     def hypotheses(self) -> list[Hypothesis]:
@@ -351,6 +353,23 @@ class ContextualHypothesisEngine:
                 self._bandit.update(property_type, mutation_type, "INSUFFICIENT_DATA")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("contextual_hyp.bandit_update_failed", error=str(exc))
+
+    async def _on_hypothesis_status_changed(self, event: HDWPEvent) -> None:
+        payload = event.payload
+        if not isinstance(payload, dict):
+            return
+        hyp_id = payload.get("id", "")
+        new_status_str = payload.get("new_status", "")
+        if not hyp_id or not new_status_str:
+            return
+        try:
+            new_status = HypothesisStatus(new_status_str)
+        except ValueError:
+            return
+        for h in self._hypotheses:
+            if h.id == hyp_id:
+                h.status = new_status
+                break
 
     async def _generate_follow_up_confirmed(self, payload: dict) -> None:
         """Génère des hypothèses de suivi après un finding confirmé."""

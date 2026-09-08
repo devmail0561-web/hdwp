@@ -14,6 +14,7 @@ from hdwp.core.bus.events import (
     FINDING_REFUTED,
     HYPOTHESIS_AMBIGUOUS,
     HYPOTHESIS_GENERATED,
+    HYPOTHESIS_STATUS_CHANGED,
     PROPERTY_INFERRED,
     HDWPEvent,
 )
@@ -155,6 +156,7 @@ class HypothesisEngine:
         bus.on(FINDING_CONFIRMED, self._on_finding_confirmed)
         bus.on(FINDING_REFUTED, self._on_finding_refuted)
         bus.on(HYPOTHESIS_AMBIGUOUS, self._on_hypothesis_ambiguous_bandit)
+        bus.on(HYPOTHESIS_STATUS_CHANGED, self._on_hypothesis_status_changed)
 
     async def _on_property_inferred(self, event: HDWPEvent) -> None:
         prop_data = event.payload
@@ -787,6 +789,22 @@ class HypothesisEngine:
         hyp = self._hypotheses.get(hyp_id)
         property_type = hyp.property_type or "" if hyp else ""
         self._bandit.update(property_type, mutation_type, "INSUFFICIENT_DATA", score=score)
+
+    async def _on_hypothesis_status_changed(self, event: HDWPEvent) -> None:
+        payload = event.payload
+        if not isinstance(payload, dict):
+            return
+        hyp_id = payload.get("id", "")
+        new_status_str = payload.get("new_status", "")
+        if not hyp_id or not new_status_str:
+            return
+        try:
+            new_status = HypothesisStatus(new_status_str)
+        except ValueError:
+            return
+        hyp = self._hypotheses.get(hyp_id)
+        if hyp is not None:
+            hyp.status = new_status
 
     @property
     def bandit(self) -> object:

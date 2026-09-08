@@ -4,6 +4,10 @@
 import asyncio
 import time
 
+import structlog
+
+logger = structlog.get_logger()
+
 
 class TokenBucket:
     """Async rate limiter using the token bucket algorithm."""
@@ -14,6 +18,8 @@ class TokenBucket:
             rate: Tokens added per second (e.g. 1.0 for 60 req/min).
             capacity: Maximum burst size.  Defaults to ``max(1, int(rate))``.
         """
+        if rate <= 0:
+            raise ValueError(f"rate must be positive, got {rate}")
         self._rate = rate
         self._capacity = capacity if capacity is not None else max(1, int(rate))
         self._tokens = float(self._capacity)
@@ -45,5 +51,8 @@ class TokenBucket:
     @classmethod
     def from_rpm(cls, requests_per_minute: int) -> "TokenBucket":
         """Create a bucket calibrated to *requests_per_minute*."""
-        rate = requests_per_minute / 60.0
-        return cls(rate=rate, capacity=max(1, requests_per_minute // 10))
+        if requests_per_minute < 0:
+            logger.warning("rate_limiter.negative_rpm_clamped", value=requests_per_minute, effective=1)
+        effective_rpm = max(1, requests_per_minute)
+        rate = effective_rpm / 60.0
+        return cls(rate=rate, capacity=max(1, effective_rpm // 10))
