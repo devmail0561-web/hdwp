@@ -28,7 +28,7 @@ _OWNER_FIELDS = frozenset({
 
 _ADMIN_PATH_RE = re.compile(
     r'/(?:admin|manage|management|internal|staff|superuser|root|system|backoffice)',
-    re.I
+    re.IGNORECASE
 )
 
 
@@ -193,7 +193,7 @@ def _detect_owner_field(response_corpus: dict[str, list[dict]]) -> str | None:
 def _find_id_param(path: str, model: ApplicationModelData) -> str | None:
     """Trouve le nom du paramètre ID dans le path ou les paramètres de l'endpoint."""
     # Chercher un paramètre de path du type {name_id} ou {id}
-    m = re.search(r'\{([a-z_]+)\}', path, re.I)
+    m = re.search(r'\{([a-z_]+)\}', path, re.IGNORECASE)
     if m:
         return m.group(1)
     # Chercher dans les paramètres de l'endpoint

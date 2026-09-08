@@ -368,9 +368,9 @@ def _register_builtins() -> None:
             apply_parameter_pollution,
             apply_path_traversal,
             apply_privilege_escalation,
-            apply_type_confusion,
             apply_race_condition,
             apply_token_reuse,
+            apply_type_confusion,
         )
         from hdwp.core.experiment.request_selector import (
             plan_field_injection,

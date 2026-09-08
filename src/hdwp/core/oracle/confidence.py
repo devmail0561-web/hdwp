@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from hdwp.core.model.schemas import ConfidenceScore, ExperimentResult, SemanticDiff
+from hdwp.core.model.schemas import ConfidenceScore, ExperimentResult, SemanticDiff, SignalContribution
 from hdwp.core.oracle.violation_oracle import ViolationAssessment, ViolationVerdict
 
 WEIGHTS = {
@@ -188,6 +188,19 @@ V2_DEFAULT_WEIGHTS = {
 
 V2_DEFAULT_BIAS = -4.0
 
+_DIMENSION_LABELS = {
+    "oracle_strength": "Force du verdict oracle",
+    "reproducibility": "Reproductibilité",
+    "observation_quality": "Qualité des observations",
+    "behavioral_specificity": "Spécificité comportementale",
+    "experiment_coverage": "Couverture expérimentale",
+    "temporal_signal": "Anomalie temporelle détectée",
+    "crossrole_signal": "Différence cross-rôle confirmée",
+    "invariant_violated": "Invariant de sécurité violé",
+    "waf_bypass_success": "Contournement WAF réussi",
+    "causal_depth": "Profondeur de causalité (replays)",
+}
+
 
 def _sigmoid(x: float) -> float:
     if x >= 0:
@@ -229,6 +242,21 @@ class ConfidenceModelV2:
             "causal_depth": causal_depth,
         }
         return self.predict(features)
+
+    def explain(self, features: dict[str, float]) -> list[SignalContribution]:
+        contributions = []
+        for dim in V2_DIMENSIONS:
+            raw = features.get(dim, 0.0)
+            w = self.weights.get(dim, 0.0)
+            contributions.append(SignalContribution(
+                dimension=dim,
+                raw_value=round(raw, 4),
+                weight=round(w, 4),
+                contribution=round(w * raw, 4),
+                label=_DIMENSION_LABELS.get(dim, dim),
+            ))
+        contributions.sort(key=lambda c: abs(c.contribution), reverse=True)
+        return contributions
 
     def update_weights(self, new_weights: dict[str, float]) -> None:
         for dim in V2_DIMENSIONS:

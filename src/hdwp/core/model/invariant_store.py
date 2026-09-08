@@ -147,6 +147,35 @@ class InvariantStore:
 
         return violation
 
+    async def check_response_violations(
+        self,
+        endpoint_path: str,
+        response_body: object,
+        experiment_id: str = "",
+    ) -> None:
+        """
+        Vérifie toutes les violations d'invariants connus pour un endpoint
+        contre le corps d'une réponse d'expérience.
+
+        Appelé par SemanticOracle._evaluate_hypothesis sur la réponse de la
+        mutation confirmée pour détecter les fuites de données / violations d'accès.
+        """
+        learned = self.get_learned_invariants(endpoint_path)
+        if not learned or not isinstance(response_body, dict):
+            return
+        for inv in learned:
+            pt = inv.pattern_type
+            if pt.startswith("field_") and pt.endswith("_present"):
+                field_name = pt[6:-8]  # strip "field_" prefix and "_present" suffix
+                holds = field_name in response_body
+                await self.check_violation(
+                    endpoint_path=endpoint_path,
+                    pattern_type=pt,
+                    holds=holds,
+                    experiment_id=experiment_id,
+                    observed_value=response_body.get(field_name),
+                )
+
     def get_learned_invariants(self, endpoint_path: str | None = None) -> list[LearnedInvariant]:
         if endpoint_path:
             return [

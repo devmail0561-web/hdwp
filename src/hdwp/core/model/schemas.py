@@ -183,7 +183,7 @@ class ExperimentSpec(BaseModel):
     # Expérimentation adaptative : la condition est évaluée sur le résultat de mutation
     # Si True → les follow_up_specs sont ajoutés à la queue d'exécution
     trigger_condition: dict[str, Any] | None = None
-    follow_up_specs: list["ExperimentSpec"] = Field(default_factory=list)
+    follow_up_specs: list[ExperimentSpec] = Field(default_factory=list)
 
 
 # Pydantic v2 exige model_rebuild() pour les modèles auto-référentiels
@@ -230,6 +230,7 @@ class ExperimentResult(BaseModel):
     timing_ms: float = 0.0
     replayed_from: str | None = None
     timestamp: str = ""
+    is_baseline: bool = False  # True uniquement pour la requête témoin non-mutée
 
 
 class DiffVerdict(str, Enum):
@@ -264,6 +265,25 @@ class ConfidenceScore(BaseModel):
     behavioral_specificity: float = 0.0
     experiment_coverage: float = 0.0
     overall: float = 0.0
+    v2_boost: float = 0.0   # delta apporté par ConfidenceModelV2 (0 si non appliqué)
+    ml_boost: float = 0.0   # delta apporté par OracleModel (0 si non appliqué)
+
+
+class SignalContribution(BaseModel):
+    dimension: str
+    raw_value: float = 0.0
+    weight: float = 0.0
+    contribution: float = 0.0
+    label: str = ""
+
+
+class FindingExplanation(BaseModel):
+    v1_score: float = 0.0
+    v2_score: float = 0.0
+    ml_score: float = 0.0
+    signals: dict[str, float] = Field(default_factory=dict)
+    top_contributors: list[SignalContribution] = Field(default_factory=list)
+    verdict_rationale: str = ""
 
 
 class Finding(BaseModel):
@@ -273,6 +293,7 @@ class Finding(BaseModel):
     status: Literal["CONFIRMED", "REFUTED"]
     confidence: float
     confidence_breakdown: ConfidenceScore
+    explanation: FindingExplanation | None = None
     owasp_category: str = ""
     cwe_id: str = ""
     severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] = "MEDIUM"

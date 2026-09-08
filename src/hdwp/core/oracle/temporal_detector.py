@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import bisect
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -28,36 +29,40 @@ ESCALATION_DELAYS = [1.0, 3.0, 7.0]
 
 @dataclass
 class TimingBaseline:
-    samples: list[float] = field(default_factory=list)
+    # _sorted_samples is maintained in sorted order via bisect.insort — O(N) insert but O(1) p95.
+    _sorted_samples: list[float] = field(default_factory=list)
+
+    @property
+    def samples(self) -> list[float]:
+        return self._sorted_samples
 
     @property
     def count(self) -> int:
-        return len(self.samples)
+        return len(self._sorted_samples)
 
     @property
     def mean(self) -> float:
-        if not self.samples:
+        if not self._sorted_samples:
             return 0.0
-        return sum(self.samples) / len(self.samples)
+        return sum(self._sorted_samples) / len(self._sorted_samples)
 
     @property
     def stddev(self) -> float:
-        if len(self.samples) < 2:
+        if len(self._sorted_samples) < 2:
             return 0.0
         m = self.mean
-        variance = sum((s - m) ** 2 for s in self.samples) / (len(self.samples) - 1)
+        variance = sum((s - m) ** 2 for s in self._sorted_samples) / (len(self._sorted_samples) - 1)
         return math.sqrt(variance)
 
     @property
     def p95(self) -> float:
-        if not self.samples:
+        if not self._sorted_samples:
             return 0.0
-        sorted_s = sorted(self.samples)
-        idx = math.ceil(0.95 * len(sorted_s)) - 1
-        return sorted_s[max(0, idx)]
+        idx = math.ceil(0.95 * len(self._sorted_samples)) - 1
+        return self._sorted_samples[max(0, idx)]
 
     def add(self, timing_ms: float) -> None:
-        self.samples.append(timing_ms)
+        bisect.insort(self._sorted_samples, timing_ms)
 
     @property
     def threshold(self) -> float:

@@ -4,16 +4,13 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from hdwp.core.model.schemas import (
         ApplicationModelData,
         DataFlowMap,
-        EndpointNode,
         FlowEdge,
-        ParameterNode,
         RawObservation,
     )
 
@@ -32,7 +29,8 @@ def _to_snake(name: str) -> str:
 
 
 def _normalize_field(name: str) -> str:
-    return _to_snake(name).rstrip("_id").rstrip("_ids")
+    s = _to_snake(name)
+    return s.removesuffix("_ids").removesuffix("_id")
 
 
 class FlowMapBuilder:
@@ -59,7 +57,7 @@ class FlowMapBuilder:
         return False
 
     def build(self, model: ApplicationModelData) -> DataFlowMap:
-        from hdwp.core.model.schemas import DataFlowMap, FlowEdge, FlowEdgeType
+        from hdwp.core.model.schemas import DataFlowMap, FlowEdge
 
         edges: list[FlowEdge] = []
         seen: set[tuple[str, str]] = set()
@@ -222,7 +220,7 @@ def _add_implicit_dataflow_edges(
     ep_response_fields: dict[str, set[str]],
     ep_request_params: dict[str, set[str]],
 ) -> list[FlowEdge]:
-    from hdwp.core.model.schemas import FlowEdge, FlowEdgeType
+    from hdwp.core.model.schemas import FlowEdge
 
     for ep_a in model.endpoints:
         a_fields = ep_response_fields.get(ep_a.path, set())

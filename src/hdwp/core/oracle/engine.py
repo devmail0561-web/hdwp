@@ -23,6 +23,7 @@ import structlog
 
 from hdwp.core.bus.event_bus import AsyncEventBus
 from hdwp.core.bus.events import (
+    CROSSROLE_DIFF_CONFIRMED,
     DIFF_COMPUTED,
     EXPERIMENT_RESULT,
     FINDING_CONFIRMED,
@@ -30,16 +31,22 @@ from hdwp.core.bus.events import (
     HYPOTHESIS_AMBIGUOUS,
     HYPOTHESIS_EXPERIMENTS_READY,
     HYPOTHESIS_STATUS_CHANGED,
+    INVARIANT_VIOLATED,
+    ML_ORACLE_VERDICT,
+    PAYLOAD_ADAPTED,
+    TEMPORAL_ANOMALY_DETECTED,
     HDWPEvent,
 )
 from hdwp.core.model.schemas import (
     ConfidenceScore,
     ExperimentResult,
     Finding,
+    FindingExplanation,
     generate_id,
 )
 from hdwp.core.oracle.confidence import (
     CONFIRMED_THRESHOLD,
+    ConfidenceModelV2,
     compute_behavioral_specificity,
     compute_confidence,
     compute_observation_quality,
@@ -53,6 +60,7 @@ from hdwp.core.oracle.violation_oracle import (
 
 if TYPE_CHECKING:
     from hdwp.core.llm.layer import LLMLayerProtocol
+    from hdwp.core.ml.models.oracle_model import OracleModel
     from hdwp.store.repository import Repository
 
 log = structlog.get_logger()
@@ -71,6 +79,7 @@ class SemanticOracle:
         llm_layer: LLMLayerProtocol | None = None,
         model_accessor: object = None,
         tuning: object = None,
+        oracle_ml_model: OracleModel | None = None,
     ) -> None:
         self._bus = bus
         self._repo = repository
@@ -78,8 +87,23 @@ class SemanticOracle:
         self._model_accessor = model_accessor  # Callable[[], ApplicationModel] | None
         self._tuning = tuning  # TuningConfig | None — None = use module defaults
         self._results: dict[str, list[ExperimentResult]] = {}
+        self._oracle_ml = oracle_ml_model  # OracleModel Phase 1 — None si non entraîné
+
+        self.invariant_store: Any = None  # injecté par l'engine après création
+
+        # V4 — ConfidenceModelV2 (10D logistic) et collecte des signaux V3
+        self._confidence_v2 = ConfidenceModelV2()
+        self._temporal_signals: dict[str, float] = {}    # hyp_id → signal [0,1]
+        self._crossrole_signals: dict[str, float] = {}   # normalized path → signal [0,1]
+        self._invariant_signals: dict[str, float] = {}   # normalized path → 0.0|1.0
+        self._waf_bypass_attempted: set[str] = set()     # hyp_ids ayant déclenché un WAF
+
         bus.on(EXPERIMENT_RESULT, self._on_experiment_result)
         bus.on(HYPOTHESIS_EXPERIMENTS_READY, self._on_experiments_ready)
+        bus.on(TEMPORAL_ANOMALY_DETECTED, self._on_temporal_anomaly)
+        bus.on(CROSSROLE_DIFF_CONFIRMED, self._on_crossrole_diff)
+        bus.on(INVARIANT_VIOLATED, self._on_invariant_violated)
+        bus.on(PAYLOAD_ADAPTED, self._on_payload_adapted)
 
     async def _on_experiment_result(self, event: HDWPEvent) -> None:
         data = event.payload
@@ -95,6 +119,68 @@ class SemanticOracle:
             baseline_id=payload["baseline_id"],
             experiment_ids=payload["experiment_ids"],
         )
+
+    # ── V4 : collecte des signaux V3 pour ConfidenceModelV2 ──────────────────
+
+    async def _on_temporal_anomaly(self, event: HDWPEvent) -> None:
+        data = event.payload
+        if not isinstance(data, dict):
+            return
+        hyp_id = data.get("hypothesis_id", "")
+        escalation = int(data.get("escalation_level", 0))
+        signal = min((escalation + 1) / 3.0, 1.0)  # 0→0.33, 1→0.67, 2→1.0
+        if hyp_id:
+            self._temporal_signals[hyp_id] = max(
+                self._temporal_signals.get(hyp_id, 0.0), signal
+            )
+
+    async def _on_crossrole_diff(self, event: HDWPEvent) -> None:
+        data = event.payload
+        if not isinstance(data, dict):
+            return
+        url = data.get("endpoint_path", "")
+        conf = float(data.get("confidence", 0.0))
+        if url:
+            ep = _extract_endpoint(url)
+            self._crossrole_signals[ep] = max(
+                self._crossrole_signals.get(ep, 0.0), conf
+            )
+
+    async def _on_invariant_violated(self, event: HDWPEvent) -> None:
+        data = event.payload
+        if not isinstance(data, dict):
+            return
+        raw = data.get("endpoint_path", "")
+        if raw:
+            ep = _extract_endpoint(raw)
+            self._invariant_signals[ep] = 1.0
+
+    async def _on_payload_adapted(self, event: HDWPEvent) -> None:
+        data = event.payload
+        if not isinstance(data, dict):
+            return
+        hyp_id = data.get("hypothesis_id", "")
+        # Clé "endpoint" (pas "endpoint_path") — vérifié dans adaptive_payload.py
+        adaptation = data.get("adaptation", "")
+        if hyp_id and adaptation == "waf_bypass":
+            self._waf_bypass_attempted.add(hyp_id)
+
+    @property
+    def oracle_ml_model(self) -> Any:
+        """Expose l'OracleModel pour la retraining loop de l'engine."""
+        return self._oracle_ml
+
+    def update_v2_weights(self, weights: dict[str, float], bias: float | None = None) -> None:
+        """Injecte les poids appris par FeedbackLoop dans ConfidenceModelV2."""
+        self._confidence_v2.update_weights(weights)
+        if bias is not None:
+            self._confidence_v2.bias = bias
+        log.debug("oracle.v2_weights_updated from=feedback_loop")
+
+    @property
+    def oracle_results(self) -> dict[str, list[ExperimentResult]]:
+        """Vue en lecture seule des résultats accumulés, pour la collecte ML."""
+        return dict(self._results)
 
     async def _evaluate_hypothesis(
         self,
@@ -153,9 +239,17 @@ class SemanticOracle:
             log.warning("oracle.no_assessments", hypothesis_id=hyp_id)
             return
 
-        primary_verdict = assessments[0].verdict
+        # Trouver l'index de la première mutation CONFIRMED (fallback sur 0).
+        # Corrige le bug : assessments[0] peut être REFUTED même si une mutation
+        # ultérieure est CONFIRMED — ne pas utiliser le premier aveuglément.
+        _confirmed_idx = next(
+            (i for i, a in enumerate(assessments) if a.verdict == ViolationVerdict.CONFIRMED),
+            0,
+        )
+        primary_verdict = assessments[_confirmed_idx].verdict
+        _all_ambiguous = all(a.verdict == ViolationVerdict.AMBIGUOUS for a in assessments)
 
-        if replays:
+        if replays and not _all_ambiguous:
             confirming = sum(
                 1 for r in replays
                 if _verdict_matches(
@@ -175,30 +269,134 @@ class SemanticOracle:
             )
             reproducibility = confirming / len(replays)
         else:
-            reproducibility = 0.3  # pas de replay → confiance minimale, exige des preuves réelles
+            # Pas de replay, ou toutes les mutations sont AMBIGUOUS : confiance minimale.
+            # Dans le cas all_ambiguous, on ne peut pas mesurer la reproductibilité
+            # par rapport à un verdict CONFIRMED/REFUTED — on utilise le fallback.
+            reproducibility = 0.3
 
         obs_quality = compute_observation_quality(max(1, len(all_results)))
         behavioral_spec = compute_behavioral_specificity(
-            mutation_type, diffs[0], mutations[0], assessments[0]
+            mutation_type,
+            diffs[_confirmed_idx],
+            mutations[_confirmed_idx],
+            assessments[_confirmed_idx],
         )
-        # n_experiments_done / n_required : compter mutations ET replays ensemble.
-        # Ainsi : 1 mutation sans replay → coverage < 1.0 (preuve insuffisante)
-        #          1 mutation + 1 replay → coverage = 1.0 (reproductibilité vérifiée)
-        # Évite que experiment_coverage = n/n = 1.0 avec une seule expérience sans replay.
-        all_experiments_count = len(mutations) + len(replays)
+        # n_experiments_done / n_required :
+        #   n_required = max(len(mutations), 1) — coverage atteint 1.0 dès que toutes
+        #   les mutations sont faites ; les replays supplémentaires sont comptabilisés mais
+        #   cappés à n_expected pour ne pas gonfler le score au-delà de 1.0.
+        #   Si 1 mutation, 0 replays → coverage = 1/1 = 1.0
+        #   Si 1 mutation, 1 replay  → coverage = min(2,1)/1 = 1.0 (cappé)
+        #   Si 3 mutations, 0 replays → coverage = 3/3 = 1.0
+        n_expected = max(len(mutations), 1)
+        # Coverage = mutations réellement exécutées / mutations planifiées.
+        # Les replays (re-jeu d'un winning request) ne comptent pas — ils confirment
+        # une vuln déjà détectée plutôt que d'explorer de nouveaux vecteurs.
+        n_done_capped = min(len(mutations), n_expected)
         tuning_weights = _tuning_weights(self._tuning)
         score = compute_confidence(
-            assessment=assessments[0],
+            assessment=assessments[_confirmed_idx],
             reproducibility=reproducibility,
             observation_quality=obs_quality,
             behavioral_specificity=behavioral_spec,
-            n_experiments_done=all_experiments_count,
-            n_experiments_required=max(2, all_experiments_count),
+            n_experiments_done=n_done_capped,
+            n_experiments_required=n_expected,
             weights=tuning_weights,
         )
 
         all_refuted = all(a.verdict == ViolationVerdict.REFUTED for a in assessments)
         any_confirmed = any(a.verdict == ViolationVerdict.CONFIRMED for a in assessments)
+
+        # ── V4 : boost ConfidenceModelV2 avec les signaux V3 ─────────────────
+        endpoint_path = _extract_endpoint(baseline.request_sent.url)
+        temporal_sig = self._temporal_signals.get(hyp_id, 0.0)
+        crossrole_sig = self._crossrole_signals.get(endpoint_path, 0.0)
+        invariant_sig = self._invariant_signals.get(endpoint_path, 0.0)
+        waf_bypass_sig = (
+            1.0 if hyp_id in self._waf_bypass_attempted and any_confirmed else 0.0
+        )
+        causal_depth_sig = min(len(replays) / 3.0, 1.0)
+
+        v2_overall = self._confidence_v2.compute_v2(
+            v1_score=score,
+            temporal_signal=temporal_sig,
+            crossrole_signal=crossrole_sig,
+            invariant_violated=invariant_sig,
+            waf_bypass_success=waf_bypass_sig,
+            causal_depth=causal_depth_sig,
+        )
+        v1_overall = score.overall
+        if v2_overall > score.overall:
+            log.debug(
+                "oracle.v2_confidence_boost",
+                hypothesis_id=hyp_id,
+                v1=round(score.overall, 4),
+                v2=round(v2_overall, 4),
+            )
+            score = score.model_copy(update={"overall": v2_overall, "v2_boost": v2_overall - v1_overall})
+
+        await self._bus.emit(
+            ML_ORACLE_VERDICT,
+            {
+                "hypothesis_id": hyp_id,
+                "mutation_type": mutation_type,
+                "v1_overall": round(v1_overall, 4),
+                "v2_overall": round(v2_overall, 4),
+                "signals": {
+                    "temporal": temporal_sig,
+                    "crossrole": crossrole_sig,
+                    "invariant": invariant_sig,
+                    "waf_bypass": waf_bypass_sig,
+                    "causal_depth": causal_depth_sig,
+                },
+            },
+            source="semantic_oracle",
+        )
+        # Sprint 8 fix : vérifier les violations d'invariants sur la réponse mutation
+        if self.invariant_store is not None and mutations and any_confirmed:
+            try:
+                mut_resp = mutations[_confirmed_idx].response_received
+                if mut_resp is not None:
+                    await self.invariant_store.check_response_violations(
+                        endpoint_path=endpoint_path,
+                        response_body=mut_resp.body,
+                        experiment_id=mutations[_confirmed_idx].id,
+                    )
+            except Exception:
+                pass
+
+        # Éviction des signaux par hypothesis_id (ephémères — un seul consommateur par hyp).
+        # Les signaux endpoint-path (crossrole, invariant) ne sont PAS évincés ici :
+        # plusieurs hypothèses peuvent partager le même endpoint et toutes doivent
+        # bénéficier du signal (ex : BOLA + SQLi + JWT sur /api/users/{id}).
+        self._temporal_signals.pop(hyp_id, None)
+        self._waf_bypass_attempted.discard(hyp_id)
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── V4 Phase 1 : OracleModel (A/B avec V2) ───────────────────────────
+        # Boost applicable si au moins une mutation est CONFIRMED.
+        # On utilise diffs[_confirmed_idx] (la mutation confirmée), pas [0].
+        if self._oracle_ml is not None and self._oracle_ml.is_trained and diffs and any_confirmed:
+            try:
+                from hdwp.core.ml.embedders.diff_embedder import DiffEmbedder
+                ml_emb = DiffEmbedder().embed(
+                    baseline.response_received,
+                    mutations[_confirmed_idx].response_received,
+                    diffs[_confirmed_idx] if diffs else None,
+                )
+                ml_pred = self._oracle_ml.predict(ml_emb)
+                ml_confirmed = ml_pred.get("confirmed", 0.0)
+                if ml_confirmed > score.overall:
+                    log.debug(
+                        "oracle.ml_boost",
+                        hypothesis_id=hyp_id,
+                        v2=round(score.overall, 4),
+                        ml=round(ml_confirmed, 4),
+                    )
+                    score = score.model_copy(update={"overall": ml_confirmed, "ml_boost": ml_confirmed - score.overall})
+            except Exception as _ml_exc:  # noqa: BLE001
+                log.debug("oracle.ml_predict_failed", error=str(_ml_exc))
+        # ─────────────────────────────────────────────────────────────────────
 
         confirmed_threshold = (
             self._tuning.confirmed_threshold if self._tuning is not None else CONFIRMED_THRESHOLD
@@ -209,9 +407,9 @@ class SemanticOracle:
             # Extraire l'ErrorIntel depuis la mutation qui a déclenché le verdict
             if mutations:
                 try:
-                    from hdwp.core.oracle.injection_oracle import try_extract_error_intel
                     from hdwp.core.bus.events import TECH_STACK_UPDATED
-                    intel = try_extract_error_intel(mutations[0])
+                    from hdwp.core.oracle.injection_oracle import try_extract_error_intel
+                    intel = try_extract_error_intel(mutations[_confirmed_idx])
                     if intel is not None:
                         for tag in getattr(intel, "tech_tags", []):
                             await self._bus.emit(
@@ -219,10 +417,26 @@ class SemanticOracle:
                             )
                 except Exception:
                     pass
+            _v3_signals = {
+                "oracle_strength": score.oracle_strength,
+                "reproducibility": score.reproducibility,
+                "observation_quality": score.observation_quality,
+                "behavioral_specificity": score.behavioral_specificity,
+                "experiment_coverage": score.experiment_coverage,
+                "temporal_signal": temporal_sig,
+                "crossrole_signal": crossrole_sig,
+                "invariant_violated": invariant_sig,
+                "waf_bypass_success": waf_bypass_sig,
+                "causal_depth": causal_depth_sig,
+            }
             finding = _build_finding(
-                hyp_id, score, assessments[0], diffs, all_results, baseline,
+                hyp_id, score, assessments[_confirmed_idx], diffs, all_results, baseline,
                 severity_high=severity_high, severity_medium=severity_medium,
-                winning_experiment=mutations[0] if mutations else None,
+                winning_experiment=mutations[_confirmed_idx] if mutations else None,
+                v3_signals=_v3_signals,
+                confidence_v2=self._confidence_v2,
+                v1_overall=v1_overall,
+                v2_overall=v2_overall,
             )
             # Enrichir le conseil de remédiation via LLM si disponible
             if self._llm_layer is not None:
@@ -240,6 +454,27 @@ class SemanticOracle:
             )
             await self._bus.emit(FINDING_CONFIRMED, finding.model_dump(), source="semantic_oracle")
             log.info("oracle.finding_confirmed", hypothesis_id=hyp_id, confidence=score.overall)
+            # Sprint 8 : FeedbackLoop — features 10D + verdict pour SGD
+            try:
+                from hdwp.core.bus.events import ML_FEEDBACK as _ML_FB
+                await self._bus.emit(_ML_FB, {
+                    "hypothesis_id": hyp_id,
+                    "features": {
+                        "oracle_strength": score.oracle_strength,
+                        "reproducibility": score.reproducibility,
+                        "observation_quality": score.observation_quality,
+                        "behavioral_specificity": score.behavioral_specificity,
+                        "experiment_coverage": score.experiment_coverage,
+                        "temporal_signal": temporal_sig,
+                        "crossrole_signal": crossrole_sig,
+                        "invariant_violated": invariant_sig,
+                        "waf_bypass_success": waf_bypass_sig,
+                        "causal_depth": causal_depth_sig,
+                    },
+                    "verdict": "CONFIRMED",
+                }, source="semantic_oracle")
+            except Exception:
+                pass
 
         elif all_refuted:
             finding = _build_finding(
@@ -254,6 +489,27 @@ class SemanticOracle:
             )
             await self._bus.emit(FINDING_REFUTED, finding.model_dump(), source="semantic_oracle")
             log.info("oracle.hypothesis_refuted", hypothesis_id=hyp_id)
+            # Sprint 8 : FeedbackLoop — features 10D + verdict REFUTED
+            try:
+                from hdwp.core.bus.events import ML_FEEDBACK as _ML_FB
+                await self._bus.emit(_ML_FB, {
+                    "hypothesis_id": hyp_id,
+                    "features": {
+                        "oracle_strength": score.oracle_strength,
+                        "reproducibility": score.reproducibility,
+                        "observation_quality": score.observation_quality,
+                        "behavioral_specificity": score.behavioral_specificity,
+                        "experiment_coverage": score.experiment_coverage,
+                        "temporal_signal": temporal_sig,
+                        "crossrole_signal": crossrole_sig,
+                        "invariant_violated": invariant_sig,
+                        "waf_bypass_success": waf_bypass_sig,
+                        "causal_depth": causal_depth_sig,
+                    },
+                    "verdict": "REFUTED",
+                }, source="semantic_oracle")
+            except Exception:
+                pass
 
         else:
             # Tenter la désambiguïsation LLM si disponible
@@ -272,8 +528,8 @@ class SemanticOracle:
                         behavioral_specificity=compute_behavioral_specificity(
                             mutation_type, diffs[0], mutations[0], llm_assessment
                         ),
-                        n_experiments_done=len(mutations),
-                        n_experiments_required=max(1, len(mutations)),
+                        n_experiments_done=n_done_capped,
+                        n_experiments_required=n_expected,
                         weights=tuning_weights,
                     )
                     log.info(
@@ -300,6 +556,7 @@ class SemanticOracle:
                         "hypothesis_id": hyp_id,
                         "mutation_type": mutation_type,
                         "score": score.overall,
+                        "endpoint_path": endpoint_path,
                         "diff": diffs[0].model_dump(),
                         "baseline_spec": baseline.experiment_spec.model_dump() if baseline else None,
                     },
@@ -325,14 +582,35 @@ def _build_finding(
     severity_high: float = 0.90,
     severity_medium: float = 0.80,
     winning_experiment: ExperimentResult | None = None,
+    v3_signals: dict[str, float] | None = None,
+    confidence_v2: ConfidenceModelV2 | None = None,
+    v1_overall: float = 0.0,
+    v2_overall: float = 0.0,
 ) -> Finding:
     mutation_type = baseline.experiment_spec.mutation_type
     from hdwp.core.mutation_registry import owasp_cwe, remediation
 
-    # winning_request doit être la requête mutée (avec le payload), pas la baseline propre.
-    # Les règles de chaîne (ex: rule_sqli_exfil) l'inspectent pour trouver le payload SQL.
     winning = winning_experiment or baseline
     owasp, cwe = owasp_cwe(mutation_type)
+
+    explanation = None
+    if v3_signals is not None and confidence_v2 is not None:
+        top = confidence_v2.explain(v3_signals)
+        active = [c for c in top if abs(c.contribution) > 0.01]
+        if active:
+            parts = [f"{c.label} ({c.contribution:+.2f})" for c in active[:3]]
+            rationale = "Principaux signaux : " + ", ".join(parts)
+        else:
+            rationale = "Aucun signal V3 significatif — confiance basée sur le modèle V1"
+        explanation = FindingExplanation(
+            v1_score=round(v1_overall, 4),
+            v2_score=round(v2_overall, 4),
+            ml_score=round(score.ml_boost + v2_overall, 4) if score.ml_boost > 0 else 0.0,
+            signals=v3_signals,
+            top_contributors=active[:5],
+            verdict_rationale=rationale,
+        )
+
     return Finding(
         id=generate_id("FIND"),
         hypothesis_id=hyp_id,
@@ -340,6 +618,7 @@ def _build_finding(
         status=status,  # type: ignore[arg-type]
         confidence=score.overall,
         confidence_breakdown=score,
+        explanation=explanation,
         owasp_category=owasp,
         cwe_id=cwe,
         severity=_severity_from_score(score, severity_high, severity_medium),

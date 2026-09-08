@@ -187,9 +187,9 @@ class ContextualHypothesisEngine:
         pending = [h for h in self._hypotheses if h.status == HypothesisStatus.PENDING]
         if self._bandit and pending:
             try:
-                return self._bandit.select(pending)
+                return self._bandit.sort(pending)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("contextual_hyp.bandit_select_failed", error=str(exc))
+                logger.warning("contextual_hyp.bandit_sort_failed", error=str(exc))
         return pending
 
     def _build_context(self, endpoint_path: str, param_name: str = "") -> HypothesisContext:
@@ -309,9 +309,17 @@ class ContextualHypothesisEngine:
 
         if self._bandit:
             try:
-                self._bandit.update(payload.get("property_type"), reward=1.0)
+                proof = payload.get("proof", {}) or {}
+                mutation_type = proof.get("mutation_type", "unknown")
+                # Résoudre property_type depuis l'hypothèse stockée
+                hyp_id = payload.get("hypothesis_id", "")
+                hyp = next((h for h in self._hypotheses if h.id == hyp_id), None)
+                property_type = (hyp.property_type or "unknown") if hyp else "unknown"
+                self._bandit.update(property_type, mutation_type, "CONFIRMED")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("contextual_hyp.bandit_update_failed", error=str(exc))
+
+        await self._generate_follow_up_confirmed(payload)
 
     async def _on_finding_refuted(self, event: HDWPEvent) -> None:
         payload = event.payload
@@ -320,7 +328,12 @@ class ContextualHypothesisEngine:
 
         if self._bandit:
             try:
-                self._bandit.update(payload.get("property_type"), reward=0.0)
+                proof = payload.get("proof", {}) or {}
+                mutation_type = proof.get("mutation_type", "unknown")
+                hyp_id = payload.get("hypothesis_id", "")
+                hyp = next((h for h in self._hypotheses if h.id == hyp_id), None)
+                property_type = (hyp.property_type or "unknown") if hyp else "unknown"
+                self._bandit.update(property_type, mutation_type, "REFUTED")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("contextual_hyp.bandit_update_failed", error=str(exc))
 
@@ -331,9 +344,83 @@ class ContextualHypothesisEngine:
 
         if self._bandit:
             try:
-                self._bandit.update(payload.get("mutation_type"), reward=0.3)
+                mutation_type = payload.get("mutation_type", "unknown")
+                hyp_id = payload.get("hypothesis_id", "")
+                hyp = next((h for h in self._hypotheses if h.id == hyp_id), None)
+                property_type = (hyp.property_type or "unknown") if hyp else "unknown"
+                self._bandit.update(property_type, mutation_type, "INSUFFICIENT_DATA")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("contextual_hyp.bandit_update_failed", error=str(exc))
+
+    async def _generate_follow_up_confirmed(self, payload: dict) -> None:
+        """Génère des hypothèses de suivi après un finding confirmé."""
+        cwe = payload.get("cwe_id", "")
+        proof = payload.get("proof", {}) or {}
+        affected = payload.get("affected_endpoints", [])
+        mutation_type = proof.get("mutation_type", "")
+        winning_req = proof.get("winning_request") or {}
+        endpoint_path = affected[0] if affected else winning_req.get("url", "")
+        winning_method = (winning_req.get("method") or "GET").upper()
+        prop_id = payload.get("property_id") or generate_id("PROP")
+
+        if not endpoint_path:
+            return
+
+        follow_ups: list[Hypothesis] = []
+
+        # SQLi (CWE-89) : escalade vers payloads avancés
+        if cwe.endswith("-89") or mutation_type == "field_injection":
+            for payload_str, desc in [
+                ("1 UNION SELECT null,null,null--", "union-based SQLi"),
+                ("1 AND 1=CAST((SELECT table_name FROM information_schema.tables LIMIT 1) AS int)--", "error-based SQLi"),
+                ("1; SELECT pg_sleep(3)--", "stacked query + blind timing"),
+                ("1 AND SLEEP(3)--", "blind timing MySQL"),
+            ]:
+                follow_ups.append(Hypothesis(
+                    source_plugin="contextual_hypothesis_engine.followup",
+                    property_id=prop_id,
+                    property_type="integrity",
+                    statement=f"SQLi escalation ({desc}) on {endpoint_path}",
+                    priority="HIGH",
+                    required_experiments=[
+                        ExperimentSpec(
+                            mutation_type="field_injection",
+                            base_request=NormalizedRequest(method=winning_method, url=endpoint_path),
+                            mutation_params={
+                                "endpoint_path": endpoint_path,
+                                "payloads": [payload_str],
+                                "strategy_depth": "DEEP",
+                                "followup_variant": desc,
+                            },
+                        )
+                    ],
+                ))
+
+        # BOLA / IDOR (CWE-639, CWE-284) : variantes d'ID
+        elif cwe.endswith("-639") or cwe.endswith("-284") or mutation_type in ("identity_swap", "object_ref_change"):
+            for id_val in ("0", "-1", "999999"):
+                follow_ups.append(Hypothesis(
+                    source_plugin="contextual_hypothesis_engine.followup",
+                    property_id=prop_id,
+                    property_type="authorization",
+                    statement=f"BOLA ID variant {id_val} on {endpoint_path}",
+                    priority="HIGH",
+                    required_experiments=[
+                        ExperimentSpec(
+                            mutation_type="object_ref_change",
+                            base_request=NormalizedRequest(method=winning_method, url=endpoint_path),
+                            mutation_params={
+                                "endpoint_path": endpoint_path,
+                                "target_id": id_val,
+                                "followup_variant": f"id_{id_val}",
+                            },
+                        )
+                    ],
+                ))
+
+        for hyp in follow_ups:
+            if self._add_hypothesis(hyp):
+                await self._emit_hypothesis(hyp)
 
     async def _emit_hypothesis(self, hyp: Hypothesis) -> None:
         if self._repository:

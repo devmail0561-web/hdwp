@@ -21,7 +21,6 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
-import httpx
 import structlog
 import yaml
 

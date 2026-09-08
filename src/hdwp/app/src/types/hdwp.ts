@@ -12,6 +12,25 @@ export interface ConfidenceBreakdown {
   behavioral_specificity: number
   experiment_coverage: number
   overall: number
+  v2_boost: number
+  ml_boost: number
+}
+
+export interface SignalContribution {
+  dimension: string
+  raw_value: number
+  weight: number
+  contribution: number
+  label: string
+}
+
+export interface FindingExplanation {
+  v1_score: number
+  v2_score: number
+  ml_score: number
+  signals: Record<string, number>
+  top_contributors: SignalContribution[]
+  verdict_rationale: string
 }
 
 export interface Finding {
@@ -26,6 +45,7 @@ export interface Finding {
   affected_endpoints: string[]
   remediation_hint: string
   confidence_breakdown?: ConfidenceBreakdown
+  explanation?: FindingExplanation | null
   proof?: Record<string, unknown>
 }
 

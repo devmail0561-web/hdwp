@@ -15,12 +15,11 @@ Intégré dans ExperimentEngine via le mécanisme trigger_condition déjà en pl
 from __future__ import annotations
 
 import html
-import random
 import re
 import string
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 
 @dataclass
@@ -52,7 +51,7 @@ def _unicode_escape(s: str) -> str:
 def _case_variation(s: str) -> str:
     """Alterne majuscules/minuscules sur les mots-clés SQL/HTML."""
     keywords = re.compile(r'\b(select|union|insert|update|delete|from|where|'
-                          r'script|alert|onerror|onload|href|src)\b', re.I)
+                          r'script|alert|onerror|onload|href|src)\b', re.IGNORECASE)
     def vary(m: re.Match) -> str:
         word = m.group(0)
         return "".join(c.upper() if i % 2 == 0 else c.lower() for i, c in enumerate(word))
@@ -87,7 +86,7 @@ def _html_char_ref(s: str) -> str:
 ENCODING_STRATEGIES: list[EncodingStrategy] = [
     EncodingStrategy(
         name="url_encode",
-        transform=urllib.parse.quote,
+        transform=lambda s: urllib.parse.quote(s, safe=""),
         waf_effective_against={"waf:generic", "waf:nginx_limit"},
         description="URL encoding simple",
     ),

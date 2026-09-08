@@ -56,7 +56,6 @@ class HDWPPlugin(ABC):
         Les signatures sont des dicts avec les clés : vuln_id, package, ecosystem,
         version_range, fixed_version, cvss_score, owasp_category, attack_vector.
         """
-        pass
 
     async def on_load(self) -> None:
         pass

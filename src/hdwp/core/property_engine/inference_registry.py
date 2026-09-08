@@ -4,12 +4,8 @@
 from __future__ import annotations
 
 import importlib.metadata
-from typing import TYPE_CHECKING
 
 import structlog
-
-if TYPE_CHECKING:
-    from hdwp.interfaces.inference import InferenceModuleProtocol
 
 log = structlog.get_logger()
 

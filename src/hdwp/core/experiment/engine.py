@@ -100,6 +100,8 @@ class ExperimentEngine:
             await asyncio.sleep(0)
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for i, r in enumerate(results):
+            if isinstance(r, asyncio.CancelledError):
+                raise r  # propager l'annulation — ne pas avaler silencieusement
             if isinstance(r, BaseException):
                 log.warning("experiment.task_failed", task_index=i, error=str(r))
 
@@ -149,10 +151,22 @@ class ExperimentEngine:
                 plan.baseline_request, hyp.id, plan.experiment_spec,
                 role=plan.baseline_role,
             )
+            baseline = baseline.model_copy(update={"is_baseline": True})
             # Abandonner le plan si la baseline est invalide (endpoint disparu, mauvais path).
             # Tester une mutation contre une baseline 404/500 pollue l'oracle et gaspille
             # des slots de rate-limiter sans valeur ajoutée.
             base_status = baseline.response_received.status_code if baseline.response_received else 0
+            if base_status == 0:
+                # Network failure: emit so callers observe the error, but skip mutation.
+                log.warning(
+                    "experiment.baseline_invalid_skip",
+                    hypothesis_id=hyp.id,
+                    url=plan.baseline_request.url,
+                    status=base_status,
+                )
+                self._results_buffer[hyp.id].append(baseline)
+                await self._bus.emit(EXPERIMENT_RESULT, baseline.model_dump(), source="experiment_engine")
+                continue
             if base_status in (404, 500, 502, 503):
                 log.debug(
                     "experiment.baseline_invalid_skip",
@@ -235,7 +249,9 @@ class ExperimentEngine:
                 waf_tags = [t for t in model.tech_stack if t.startswith("waf:")]
                 if waf_tags and "payload" in plan.experiment_spec.mutation_params:
                     try:
-                        from hdwp.core.experiment.encoding_pipeline import build_bypass_experiment_specs
+                        from hdwp.core.experiment.encoding_pipeline import (
+                            build_bypass_experiment_specs,
+                        )
                         from hdwp.core.model.schemas import ExperimentSpec
                         waf_tag = waf_tags[0]
                         bypass_params_list = build_bypass_experiment_specs(

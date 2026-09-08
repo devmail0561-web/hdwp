@@ -100,7 +100,7 @@ def _load_or_create_ca():  # type: ignore[return]
         x509.NameAttribute(NameOID.COMMON_NAME, "HDWP Root CA"),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, "HDWP Pentest Engine"),
     ])
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     ca_cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -145,7 +145,7 @@ def _gen_cert_for_host(hostname: str, ca_cert: object, ca_key: object) -> tuple[
     except ValueError:
         san = x509.DNSName(hostname)
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     cert = (
         x509.CertificateBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)]))
@@ -384,7 +384,7 @@ class HDWPProxy:
                 await self._handle_connect(reader, writer, url)
             else:
                 await self._handle_http(reader, writer, first_line, method, url)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except Exception as exc:
             log.debug("hdwp_proxy.client_error", error=str(exc))
@@ -428,6 +428,14 @@ class HDWPProxy:
 
         req_path = (parsed.path or "/") + (("?" + parsed.query) if parsed.query else "")
         req_line = f"{method} {req_path} HTTP/1.1\r\n".encode()
+        # Si le body a été décodé depuis un stream chunked, retirer le header
+        # Transfer-Encoding et poser Content-Length pour que l'upstream ne
+        # tente pas de relire le body déjà décodé comme un nouveau stream chunked.
+        if "transfer-encoding" in {k.lower() for k in headers}:
+            headers = {k: v for k, v in headers.items()
+                       if k.lower() != "transfer-encoding"}
+            headers["Content-Length"] = str(len(body))
+            headers_raw = _headers_dict_to_raw(headers)
         t_writer.write(req_line + headers_raw + b"\r\n" + body)
         await t_writer.drain()
 
@@ -670,7 +678,7 @@ class HDWPProxy:
             body=resp_body.decode("utf-8", errors="replace") if resp_body else None,
         )
         obs = RawObservation(
-            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            timestamp=datetime.datetime.now(datetime.UTC).isoformat(),
             source="passive",
             type=ObservationType.HTTP,
             request=norm_req,

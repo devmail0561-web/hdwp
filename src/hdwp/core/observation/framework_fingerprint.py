@@ -30,31 +30,31 @@ class FingerprintRule:
 _FINGERPRINTS: list[FingerprintRule] = [
     # ── Headers ──────────────────────────────────────────────────────────────
     FingerprintRule("header", "x-powered-by", [
-        (re.compile(r'php', re.I),              "framework:php"),
-        (re.compile(r'express', re.I),          "framework:express"),
-        (re.compile(r'next\.js', re.I),         "framework:nextjs"),
-        (re.compile(r'asp\.net', re.I),         "framework:aspnet"),
-        (re.compile(r'nestjs', re.I),           "framework:nestjs"),
-        (re.compile(r'fastapi', re.I),          "framework:fastapi"),
-        (re.compile(r'django', re.I),           "framework:django"),
-        (re.compile(r'rails', re.I),            "framework:rails"),
+        (re.compile(r'php', re.IGNORECASE),              "framework:php"),
+        (re.compile(r'express', re.IGNORECASE),          "framework:express"),
+        (re.compile(r'next\.js', re.IGNORECASE),         "framework:nextjs"),
+        (re.compile(r'asp\.net', re.IGNORECASE),         "framework:aspnet"),
+        (re.compile(r'nestjs', re.IGNORECASE),           "framework:nestjs"),
+        (re.compile(r'fastapi', re.IGNORECASE),          "framework:fastapi"),
+        (re.compile(r'django', re.IGNORECASE),           "framework:django"),
+        (re.compile(r'rails', re.IGNORECASE),            "framework:rails"),
     ]),
     FingerprintRule("header", "server", [
-        (re.compile(r'gunicorn', re.I),         "server:gunicorn"),  # Python
-        (re.compile(r'puma', re.I),             "server:puma"),      # Rails
-        (re.compile(r'unicorn', re.I),          "server:unicorn"),   # Rails
-        (re.compile(r'passenger', re.I),        "server:passenger"), # Rails/Ruby
-        (re.compile(r'iis', re.I),              "server:iis"),
-        (re.compile(r'jetty', re.I),            "server:jetty"),     # Java
-        (re.compile(r'tomcat', re.I),           "server:tomcat"),    # Java
-        (re.compile(r'undertow', re.I),         "server:undertow"),  # WildFly
-        (re.compile(r'werkzeug', re.I),         "server:werkzeug"),  # Flask dev
-        (re.compile(r'uvicorn', re.I),          "server:uvicorn"),   # Python async
+        (re.compile(r'gunicorn', re.IGNORECASE),         "server:gunicorn"),  # Python
+        (re.compile(r'puma', re.IGNORECASE),             "server:puma"),      # Rails
+        (re.compile(r'unicorn', re.IGNORECASE),          "server:unicorn"),   # Rails
+        (re.compile(r'passenger', re.IGNORECASE),        "server:passenger"), # Rails/Ruby
+        (re.compile(r'iis', re.IGNORECASE),              "server:iis"),
+        (re.compile(r'jetty', re.IGNORECASE),            "server:jetty"),     # Java
+        (re.compile(r'tomcat', re.IGNORECASE),           "server:tomcat"),    # Java
+        (re.compile(r'undertow', re.IGNORECASE),         "server:undertow"),  # WildFly
+        (re.compile(r'werkzeug', re.IGNORECASE),         "server:werkzeug"),  # Flask dev
+        (re.compile(r'uvicorn', re.IGNORECASE),          "server:uvicorn"),   # Python async
     ]),
     FingerprintRule("header", "x-generator", [
-        (re.compile(r'wordpress', re.I),        "cms:wordpress"),
-        (re.compile(r'drupal', re.I),           "cms:drupal"),
-        (re.compile(r'joomla', re.I),           "cms:joomla"),
+        (re.compile(r'wordpress', re.IGNORECASE),        "cms:wordpress"),
+        (re.compile(r'drupal', re.IGNORECASE),           "cms:drupal"),
+        (re.compile(r'joomla', re.IGNORECASE),           "cms:joomla"),
     ]),
     FingerprintRule("header", "x-drupal-cache", [
         (re.compile(r'.*'),                     "cms:drupal"),
@@ -65,34 +65,34 @@ _FINGERPRINTS: list[FingerprintRule] = [
 
     # ── Cookies ───────────────────────────────────────────────────────────────
     FingerprintRule("cookie", "*", [
-        (re.compile(r'^laravel_session', re.I), "framework:laravel"),
-        (re.compile(r'^PHPSESSID$', re.I),      "framework:php"),
-        (re.compile(r'^JSESSIONID$', re.I),     "framework:java"),
-        (re.compile(r'^_rails_session', re.I),  "framework:rails"),
-        (re.compile(r'^csrftoken$', re.I),      "framework:django"),
-        (re.compile(r'^sessionid$', re.I),      "framework:django"),
-        (re.compile(r'^__RequestVerificationToken', re.I), "framework:aspnet"),
-        (re.compile(r'^wordpress_', re.I),      "cms:wordpress"),
-        (re.compile(r'^wp-settings', re.I),     "cms:wordpress"),
-        (re.compile(r'^Drupal', re.I),          "cms:drupal"),
-        (re.compile(r'^connect\.sid', re.I),    "framework:express"),
-        (re.compile(r'^flask_', re.I),          "framework:flask"),
+        (re.compile(r'^laravel_session', re.IGNORECASE), "framework:laravel"),
+        (re.compile(r'^PHPSESSID$', re.IGNORECASE),      "framework:php"),
+        (re.compile(r'^JSESSIONID$', re.IGNORECASE),     "framework:java"),
+        (re.compile(r'^_rails_session', re.IGNORECASE),  "framework:rails"),
+        (re.compile(r'^csrftoken$', re.IGNORECASE),      "framework:django"),
+        (re.compile(r'^sessionid$', re.IGNORECASE),      "framework:django"),
+        (re.compile(r'^__RequestVerificationToken', re.IGNORECASE), "framework:aspnet"),
+        (re.compile(r'^wordpress_', re.IGNORECASE),      "cms:wordpress"),
+        (re.compile(r'^wp-settings', re.IGNORECASE),     "cms:wordpress"),
+        (re.compile(r'^Drupal', re.IGNORECASE),          "cms:drupal"),
+        (re.compile(r'^connect\.sid', re.IGNORECASE),    "framework:express"),
+        (re.compile(r'^flask_', re.IGNORECASE),          "framework:flask"),
     ]),
 
     # ── URL path patterns ─────────────────────────────────────────────────────
     FingerprintRule("path", None, [
-        (re.compile(r'/wp-admin|/wp-content|/wp-includes', re.I), "cms:wordpress"),
-        (re.compile(r'/actuator/',  re.I),       "framework:spring"),
-        (re.compile(r'\.php\b',    re.I),        "framework:php"),
-        (re.compile(r'\.aspx?\b',  re.I),        "framework:aspnet"),
-        (re.compile(r'/rails/info',re.I),        "framework:rails"),
-        (re.compile(r'/_next/',    re.I),        "framework:nextjs"),
-        (re.compile(r'/nuxt/',     re.I),        "framework:nuxt"),
-        (re.compile(r'/graphql\b', re.I),        "framework:graphql"),
-        (re.compile(r'/api/v\d+/', re.I),        "server:rest-api"),
-        (re.compile(r'/swagger|/api-docs', re.I), "server:openapi"),
-        (re.compile(r'/sites/default/', re.I),   "cms:drupal"),
-        (re.compile(r'/administrator/', re.I),   "cms:joomla"),
+        (re.compile(r'/wp-admin|/wp-content|/wp-includes', re.IGNORECASE), "cms:wordpress"),
+        (re.compile(r'/actuator/',  re.IGNORECASE),       "framework:spring"),
+        (re.compile(r'\.php\b',    re.IGNORECASE),        "framework:php"),
+        (re.compile(r'\.aspx?\b',  re.IGNORECASE),        "framework:aspnet"),
+        (re.compile(r'/rails/info',re.IGNORECASE),        "framework:rails"),
+        (re.compile(r'/_next/',    re.IGNORECASE),        "framework:nextjs"),
+        (re.compile(r'/nuxt/',     re.IGNORECASE),        "framework:nuxt"),
+        (re.compile(r'/graphql\b', re.IGNORECASE),        "framework:graphql"),
+        (re.compile(r'/api/v\d+/', re.IGNORECASE),        "server:rest-api"),
+        (re.compile(r'/swagger|/api-docs', re.IGNORECASE), "server:openapi"),
+        (re.compile(r'/sites/default/', re.IGNORECASE),   "cms:drupal"),
+        (re.compile(r'/administrator/', re.IGNORECASE),   "cms:joomla"),
     ]),
 ]
 

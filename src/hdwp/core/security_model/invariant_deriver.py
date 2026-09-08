@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 from hdwp.core.model.schemas import (
     ExperimentSpec,
-    Hypothesis,
     NormalizedRequest,
     PropertyType,
     SecurityProperty,
@@ -91,7 +90,7 @@ class InvariantDeriver:
         return props
 
     def _build_bola_experiments(
-        self, ownership: "Any", model: ApplicationModelData
+        self, ownership: Any, model: ApplicationModelData
     ) -> list[ExperimentSpec]:
         """Construit des ExperimentSpec BOLA avec les IDs réels du corpus."""
         specs = []

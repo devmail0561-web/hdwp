@@ -53,6 +53,14 @@ ATTACK_STATE_UPDATED = "attack.state.updated"
 GOAL_REACHED = "goal.reached"
 PRECONDITION_MISSING = "precondition.missing"
 
+# ── V4 ML event types ────────────────────────────────────────────────────────
+ML_EMBEDDING_COMPUTED = "ml.embedding_computed"   # réservé Phase 1 (OracleModel)
+ML_ORACLE_VERDICT     = "ml.oracle_verdict"        # émis par SemanticOracle après évaluation V2
+ML_MODEL_RETRAINED    = "ml.model_retrained"       # émis après chaque cycle d'entraînement
+ML_VULN_PREDICTED     = "ml.vuln_predicted"        # émis par VulnClassifier après prédiction per-endpoint
+ML_FEEDBACK           = "ml.feedback"              # Sprint 8 — features 10D + verdict final → FeedbackLoop
+RL_TRANSITION         = "rl.transition"            # réservé Phase 3 (PayloadOptimizer)
+
 ALL_EVENT_TYPES = [
     OBSERVATION_RAW,
     MODEL_UPDATED,
@@ -84,6 +92,12 @@ ALL_EVENT_TYPES = [
     ATTACK_STATE_UPDATED,
     GOAL_REACHED,
     PRECONDITION_MISSING,
+    ML_EMBEDDING_COMPUTED,
+    ML_ORACLE_VERDICT,
+    ML_MODEL_RETRAINED,
+    ML_VULN_PREDICTED,
+    ML_FEEDBACK,
+    RL_TRANSITION,
 ]
 
 

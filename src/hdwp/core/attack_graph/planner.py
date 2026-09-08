@@ -59,6 +59,7 @@ class AttackGraphPlanner:
         self._transitions: list[AttackTransition] = []
         self._precondition_solver = PreconditionSolver(bus)
         self._goals: list[GoalDefinition] = list(BUILTIN_GOALS.values())
+        self._last_chained_count: int = 0  # évite la re-exécution en mode continu
 
         bus.on(FINDING_CONFIRMED, self._on_finding_confirmed)
 
@@ -72,7 +73,11 @@ class AttackGraphPlanner:
             logger.warning("attack_graph.finding_parse_error", exc_info=True)
 
     def has_pending_chains(self) -> bool:
-        return len(self._confirmed_findings) >= 2
+        # Seul vrai si de nouveaux findings ont été ajoutés depuis la dernière exécution
+        return (
+            len(self._confirmed_findings) >= 2
+            and len(self._confirmed_findings) > self._last_chained_count
+        )
 
     def _heuristic(self, state: AttackState, goal: GoalDefinition) -> float:
         return float(state.missing_for(goal.required_state))
@@ -114,11 +119,14 @@ class AttackGraphPlanner:
                 "assets_writable": current.state.assets_writable,
                 "credentials_held": current.state.credentials_held,
                 "privileges": current.state.privileges,
+                "knowledge": current.state.knowledge,
+                "session_tokens": current.state.session_tokens,
             }):
                 return current.path
 
+            path_ids = {t.finding_id for t in current.path}
             for transition in self._transitions:
-                if transition.finding_id in [t.finding_id for t in current.path]:
+                if transition.finding_id in path_ids:
                     continue
 
                 if not current.state.satisfies(transition.preconditions):
@@ -150,17 +158,25 @@ class AttackGraphPlanner:
         return best
 
     def _state_key(self, state: AttackState) -> frozenset:
+        # Préfixe de catégorie pour éviter les collisions entre ensembles distincts.
+        # knowledge et session_tokens inclus pour que les états qui ne diffèrent que
+        # par ces champs ne soient pas pruné par le visited-set de A*.
         return frozenset(
-            list(state.assets_readable)
-            + list(state.assets_writable)
-            + list(state.credentials_held)
-            + list(state.privileges)
+            ["r:" + x for x in state.assets_readable]
+            + ["w:" + x for x in state.assets_writable]
+            + ["c:" + x for x in state.credentials_held]
+            + ["p:" + x for x in state.privileges]
+            + ["k:" + k for k in state.knowledge.keys()]
+            + ["t:" + k for k in state.session_tokens.keys()]
         )
 
     async def plan_and_execute(self, exp_engine: Any) -> list[ChainSpec]:
         if not self._transitions:
             return []
 
+        # Marquer immédiatement pour éviter la re-exécution si une exception
+        # est levée plus bas (bus emit, _save_chain_finding, etc.).
+        self._last_chained_count = len(self._confirmed_findings)
         executed_specs: list[ChainSpec] = []
 
         for goal in self._goals:
@@ -175,7 +191,7 @@ class AttackGraphPlanner:
                 steps=len(plan),
             )
 
-            success, proof = await self._execute_plan(plan, exp_engine)
+            success, proof, exec_state = await self._execute_plan(plan, exp_engine)
 
             if success:
                 await self._save_chain_finding(spec, proof)
@@ -201,13 +217,14 @@ class AttackGraphPlanner:
                 executed_specs.append(spec)
                 logger.info("attack_graph.goal_reached", goal=goal.goal_type.value)
             else:
+                # Utiliser l'état réel atteint avant l'échec — pas un AttackState() vide
                 for transition in plan:
-                    if not AttackState().satisfies(transition.preconditions):
-                        await self._precondition_solver.solve(
-                            AttackState(), transition
-                        )
+                    if not exec_state.satisfies(transition.preconditions):
+                        await self._precondition_solver.solve(exec_state, transition)
                 logger.info("attack_graph.plan_failed", goal=goal.goal_type.value)
 
+        # Marquer les findings traités pour éviter la re-exécution en mode continu
+        self._last_chained_count = len(self._confirmed_findings)
         return executed_specs
 
     def _plan_to_chain_spec(
@@ -239,9 +256,15 @@ class AttackGraphPlanner:
 
     async def _execute_plan(
         self, plan: list[AttackTransition], exp_engine: Any
-    ) -> tuple[bool, dict]:
+    ) -> tuple[bool, dict, AttackState]:
+        """Exécute un plan et retourne (success, proof, état_atteint).
+
+        exec_state reflète les effets de chaque étape réussie — utilisé par
+        le fail branch pour ne résoudre que les préconditions réellement manquantes.
+        """
         context: dict[str, Any] = {}
         step_results: list[dict] = []
+        exec_state = AttackState()  # état progressivement enrichi par les effets
 
         for i, transition in enumerate(plan):
             request = self._build_request(transition)
@@ -257,19 +280,23 @@ class AttackGraphPlanner:
                         "url": transition.endpoint,
                         "finding_id": transition.finding_id,
                     })
+                    exec_state = exec_state.apply_effects(transition.effects)
                     continue
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "attack_graph.step_failed", step=i, error=str(exc)
                 )
-                return False, {}
+                return False, {}, exec_state
 
+            sc = result.response_received.status_code
             step_results.append({
                 "step": i,
-                "status_code": result.response_received.status_code,
+                "status_code": sc,
                 "url": result.request_sent.url,
                 "finding_id": transition.finding_id,
             })
+            if 200 <= sc < 300:
+                exec_state = exec_state.apply_effects(transition.effects)
 
         terminal = step_results[-1] if step_results else {}
         status = terminal.get("status_code", 500)
@@ -281,7 +308,7 @@ class AttackGraphPlanner:
             "context_values": {k: str(v)[:200] for k, v in context.items()},
             "plan_length": len(plan),
         }
-        return success, proof
+        return success, proof, exec_state
 
     async def _save_chain_finding(self, spec: ChainSpec, proof: dict) -> None:
         if not self._repository:
@@ -334,7 +361,7 @@ class AttackGraphPlanner:
         for goal in self._goals:
             plan = self.plan(goal=goal)
             if plan:
-                success, proof = await self._execute_plan(plan, exp_engine)
+                success, proof, _ = await self._execute_plan(plan, exp_engine)
                 results.append({
                     "goal_type": goal.goal_type.value,
                     "success": success,

@@ -29,8 +29,12 @@ class AttackState:
     def satisfies(self, preconditions: dict[str, set[str]]) -> bool:
         for key, required in preconditions.items():
             current = getattr(self, key, set())
-            if isinstance(current, set) and not required.issubset(current):
-                return False
+            if isinstance(current, set):
+                if not required.issubset(current):
+                    return False
+            elif isinstance(current, dict):
+                if not required.issubset(current.keys()):
+                    return False
         return True
 
     def apply_effects(self, effects: StateEffects) -> AttackState:
@@ -51,6 +55,8 @@ class AttackState:
             current = getattr(self, key, set())
             if isinstance(current, set):
                 count += len(required - current)
+            elif isinstance(current, dict):
+                count += len(required - current.keys())
         return count
 
 

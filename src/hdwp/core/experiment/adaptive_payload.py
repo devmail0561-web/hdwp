@@ -30,7 +30,7 @@ class SignalType(str, Enum):
     NORMAL = "NORMAL"
 
 
-_BLOCKED_CODES = frozenset({403, 406, 429, 444, 503})
+_BLOCKED_CODES = frozenset({403, 406, 429, 444})  # 503 = erreur serveur, pas blocage WAF
 _ERROR_CODES = frozenset({500, 502, 503})
 _STACK_TRACE_MARKERS = ("traceback", "stack trace", "at line", "exception in", "error at")
 
@@ -46,7 +46,17 @@ class SignalClassifier:
         if baseline_ms > 0 and timing_ms > baseline_ms * 3:
             return SignalType.TIMING_ANOMALY
 
-        if isinstance(body, dict) and self._has_unexpected_fields(body):
+        # body est une str (JSON brut) — tenter le parsing avant le isinstance check
+        _body_dict: dict | None = body if isinstance(body, dict) else None
+        if _body_dict is None and isinstance(body, str):
+            try:
+                import json as _json
+                _parsed = _json.loads(body)
+                if isinstance(_parsed, dict):
+                    _body_dict = _parsed
+            except Exception:
+                pass
+        if _body_dict is not None and self._has_unexpected_fields(_body_dict):
             return SignalType.UNEXPECTED_FIELD
 
         return SignalType.NORMAL

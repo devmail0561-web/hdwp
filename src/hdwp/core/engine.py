@@ -16,7 +16,6 @@ Les composants communiquent via le bus : aucun appel direct entre eux.
 """
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -31,19 +30,49 @@ from hdwp.core.context.scope_guard import ScopeGuard
 from hdwp.core.experiment.engine import ExperimentEngine
 from hdwp.core.experiment.rate_limiter import TokenBucket
 from hdwp.core.experiment.session_manager import SessionManager
-from hdwp.core.reasoning.layer import ContextualHypothesisEngine
 from hdwp.core.model.application_model import ApplicationModel
 from hdwp.core.model.schemas import Finding
 from hdwp.core.observation.engine import ObservationEngine
 from hdwp.core.oracle.engine import SemanticOracle
 from hdwp.core.oracle.passive_engine import PassiveFindingEngine
 from hdwp.core.property_engine.engine import SecurityPropertyEngine
+from hdwp.core.reasoning.layer import ContextualHypothesisEngine
 from hdwp.core.report.engine import ReportEngine
 from hdwp.plugins.registry import PluginRegistry
 from hdwp.store.database import init_db
 from hdwp.store.repository import Repository
 
 log = structlog.get_logger()
+
+_FALLBACK_FP = "UNKNOWN:0:0:none"
+
+# Mapping OWASP category + mutation_type → vuln_class pour SimilarityIndex
+_OWASP_TO_VULN: dict[str, str] = {
+    "A01:2021": "bola",
+    "A02:2021": "jwt",
+    "A03:2021": "sqli",
+    "A05:2021": "cors",
+}
+_MUTATION_TO_VULN: dict[str, str] = {
+    "identity_swap": "bola",
+    "object_ref_change": "bola",
+    "privilege_escalation": "authz",
+    "jwt_manipulation": "jwt",
+    "origin_test": "cors",
+    "field_injection": "sqli",
+    "nosqli": "sqli",
+    "path_traversal": "path_traversal",
+    "ssrf": "ssrf",
+    "http_smuggling": "http_smuggling",
+}
+
+
+def _owasp_to_vuln_class(owasp: str, mutation_type: str) -> str:
+    """Infère le vuln_class depuis l'OWASP category ou le mutation_type."""
+    return (
+        _MUTATION_TO_VULN.get(mutation_type, "")
+        or _OWASP_TO_VULN.get(owasp, "")
+    )
 
 
 async def _on_credentials_captured(
@@ -165,7 +194,14 @@ class HDWPEngine:
         disabled_ids = set(context.config.plugins.disabled)
         if plugin_ids:
             for pid in plugin_ids:
-                registry.enable(pid)
+                if pid in disabled_ids:
+                    log.warning(
+                        "engine.plugin_explicitly_disabled",
+                        plugin_id=pid,
+                        msg="Plugin requested via plugin_ids but is in disabled list — skipped",
+                    )
+                else:
+                    registry.enable(pid)
         elif context.config.plugins.enabled:
             for pid in context.config.plugins.enabled:
                 registry.enable(pid)
@@ -253,12 +289,21 @@ class HDWPEngine:
             threat_model_accessor=lambda: threat_engine.scores,
             invariant_store=invariant_store,
         )
+        # V4 Sprint 10 : MetaLearner — init + chargement de tous les composants ML
+        from hdwp.core.knowledge.base import _hash_url as _kb_hash_url
+        from hdwp.core.ml.meta_learner import MetaLearner
+        _target_hash = _kb_hash_url(context.base_url)
+        ml = await MetaLearner.load(kb, target_hash=_target_hash, target_type=url_target_type)
+        log.info("engine.ml_stack_loaded", stats=ml.stats())
+
         oracle = SemanticOracle(
             bus, repository, llm_layer=llm_layer,
             model_accessor=app_model.snapshot,
             tuning=tuning,
+            oracle_ml_model=ml.oracle_model,
         )
         oracle.invariant_store = invariant_store
+        ml.inject_feedback_into_oracle(oracle)
 
         # V3 CrossRoleDiffEngine: multi-role response comparison
         from hdwp.core.oracle.crossrole_diff import CrossRoleDiffEngine
@@ -351,6 +396,11 @@ class HDWPEngine:
         engine._adaptive_payload_engine = adaptive_engine
         engine._threat_engine = threat_engine
         engine._invariant_store = invariant_store
+        engine._prioritizer = prioritizer
+        # V4 Sprint 10 : MetaLearner remplace les refs individuelles ML
+        engine._ml = ml
+        engine._target_hash = _target_hash
+        ml.wire(bus, oracle)
 
         return engine
 
@@ -438,9 +488,18 @@ class HDWPEngine:
                 msg="Le modele a peu de couverture -- les hypotheses peuvent etre limitees",
             )
 
+        # V4 Sprint 10 : MetaLearner — boosts post-observation + fit clusterer
+        _ml = getattr(self, "_ml", None)
+        if _ml is not None:
+            _type_boosts = await _ml.apply_boosts(self._bus, self._app_model.snapshot())
+            if _type_boosts and getattr(self, "_prioritizer", None) is not None:
+                self._prioritizer.set_ml_type_boosts(_type_boosts)
+            await _ml.fit_clusterer(self._app_model.snapshot())
+
         # Phase 2 vague 1 : experiments sur les hypothèses générées pendant le crawl.
-        # Le corpus est complet (crawl terminé), pas de risque de concurrence.
         pending_v1 = self._hyp_engine.get_pending()
+        if _ml is not None:
+            pending_v1 = _ml.sort_hypotheses(pending_v1, self._app_model.snapshot())
         log.info("engine.experiments_v1", count=len(pending_v1))
 
         if pending_v1:
@@ -466,6 +525,8 @@ class HDWPEngine:
 
         # Phase 2 vague 2 : nouvelles hypothèses générées par le version scan ou l'auto-registration.
         pending_v2 = self._hyp_engine.get_pending()
+        if _ml is not None:
+            pending_v2 = _ml.sort_hypotheses(pending_v2, self._app_model.snapshot())
         log.info("engine.experiments_v2", count=len(pending_v2))
 
         if pending_v2:
@@ -519,6 +580,21 @@ class HDWPEngine:
             )
             sessions = await self._kb.get_session_count()
             log.info("engine.knowledge_updated", sessions=sessions, findings=len(findings))
+
+        # V4 Sprint 10 : MetaLearner — collecte + réentraînement + sauvegarde
+        _ml_save = getattr(self, "_ml", None)
+        if self._kb is not None and _ml_save is not None:
+            from hdwp.core.knowledge.base import classify_target as _classify_target2
+            _t_type2 = _classify_target2(self._context.base_url, self._app_model.snapshot())
+            await _ml_save.save_session(
+                kb=self._kb,
+                session_id=self._context.session_id,
+                findings=findings,
+                oracle=self._oracle,
+                snapshot=self._app_model.snapshot(),
+                target_hash=getattr(self, "_target_hash", ""),
+                target_type=_t_type2,
+            )
 
         return findings
 

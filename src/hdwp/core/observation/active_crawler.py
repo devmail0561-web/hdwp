@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import re
 import time
 from collections import deque
@@ -327,7 +326,7 @@ class ActiveCrawler:
             # Si aucun proxy MITM, build_client() injecte Tor automatiquement.
             async with build_client(
                 timeout=15.0,
-                proxy_url=self._proxy_url,  # None → Tor via module global
+                proxy_url=self._proxy_url if self._proxy_url is not None else ...,
             ) as client:
                 client.headers.update(_build_auth_headers(role.credentials) or {})
                 # Consulter robots.txt et sitemap avant le BFS

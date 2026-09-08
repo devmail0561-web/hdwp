@@ -8,8 +8,9 @@ After install: playwright install chromium
 """
 from __future__ import annotations
 
-import structlog
 from typing import TYPE_CHECKING
+
+import structlog
 
 if TYPE_CHECKING:
     from hdwp.core.bus.event_bus import AsyncEventBus

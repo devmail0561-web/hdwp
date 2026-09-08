@@ -285,9 +285,19 @@ class HypothesisEngine:
                     if any(n in prop.model_nodes for n in ([ep.id] + ep.parameters)):
                         endpoint_path = ep.path
                         break
-                # Pick least-privileged role as attacker
+                # Pick least-privileged role as attacker (never pick the most-privileged).
+                # Heuristic: prefer common low-priv names, then last role in list
+                # (configs typically list roles from most- to least-privileged).
                 role_names = [r.name for r in model.roles]
-                target_role = "anonymous" if "anonymous" in role_names else (role_names[0] if role_names else "anonymous")
+                _low_priv = {"anonymous", "guest", "viewer", "reader", "public"}
+                _med_priv = {"user", "customer", "member", "subscriber"}
+                target_role = next(
+                    (n for n in role_names if n.lower() in _low_priv),
+                    next(
+                        (n for n in role_names if n.lower() in _med_priv),
+                        role_names[-1] if role_names else "anonymous",
+                    ),
+                )
                 if endpoint_path:
                     hypotheses.append(
                         Hypothesis(
@@ -713,7 +723,9 @@ class HypothesisEngine:
     async def _on_finding_refuted(self, event: HDWPEvent) -> None:
         """Mise à jour bandit + pivot stratégique si seuil de refutations atteint."""
         from hdwp.core.hypothesis.strategy_pivot import (
-            endpoint_hash, generate_pivot_hypotheses, should_pivot,
+            endpoint_hash,
+            generate_pivot_hypotheses,
+            should_pivot,
         )
 
         data = event.payload
@@ -798,7 +810,11 @@ class HypothesisEngine:
             )
             # Clé structurée UNIQUEMENT si l'endpoint est connu
             if ep:
-                param = exp.mutation_params.get("parameter_name", "")
+                # Préfixer pour éviter la collision entre un parameter_name réel
+                # (ex: "id_0") et un followup_variant portant le même nom.
+                pname = exp.mutation_params.get("parameter_name", "")
+                fvar = exp.mutation_params.get("followup_variant", "")
+                param = f"p:{pname}" if pname else f"f:{fvar}"
                 if (ep, exp.mutation_type, param) in self._seen_keys:
                     return True
         # Fallback sur statement — distingue les endpoints différents
@@ -817,7 +833,9 @@ class HypothesisEngine:
             )
             # N'enregistrer que si l'endpoint est connu — évite les faux positifs cross-endpoint
             if ep:
-                param = exp.mutation_params.get("parameter_name", "")
+                pname = exp.mutation_params.get("parameter_name", "")
+                fvar = exp.mutation_params.get("followup_variant", "")
+                param = f"p:{pname}" if pname else f"f:{fvar}"
                 self._seen_keys.add((ep, exp.mutation_type, param))
 
     @property

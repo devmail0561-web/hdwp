@@ -71,6 +71,19 @@ class TestAttackStateSatisfies:
         state = _make_state()
         assert state.satisfies({})
 
+    def test_satisfies_knowledge_key_present(self) -> None:
+        # Régression : dict knowledge ignoré si isinstance check manquant
+        state = _make_state(knowledge={"db_access": "postgres", "schema": "public"})
+        assert state.satisfies({"knowledge": {"db_access"}})
+
+    def test_not_satisfies_knowledge_key_missing(self) -> None:
+        state = _make_state(knowledge={})
+        assert not state.satisfies({"knowledge": {"db_access"}})
+
+    def test_not_satisfies_knowledge_partial(self) -> None:
+        state = _make_state(knowledge={"db_access": "postgres"})
+        assert not state.satisfies({"knowledge": {"db_access", "schema"}})
+
 
 class TestAttackStateApplyEffects:
     def test_grants_readable(self) -> None:
@@ -113,6 +126,16 @@ class TestAttackStateMissingFor:
     def test_zero_when_satisfied(self) -> None:
         state = _make_state(privileges={"elevated"}, credentials_held={"tok"})
         assert state.missing_for({"privileges": {"elevated"}, "credentials_held": {"tok"}}) == 0
+
+    def test_missing_for_knowledge_dict(self) -> None:
+        # Régression : dict knowledge retournait 0 au lieu du nombre de clés manquantes
+        state = _make_state(knowledge={"db_access": "postgres"})
+        count = state.missing_for({"knowledge": {"db_access", "schema", "tables"}})
+        assert count == 2  # schema + tables manquants
+
+    def test_missing_for_knowledge_all_present(self) -> None:
+        state = _make_state(knowledge={"db_access": "p", "schema": "s"})
+        assert state.missing_for({"knowledge": {"db_access", "schema"}}) == 0
 
 
 # ── AttackTransition ─────────────────────────────────────────────────────────

@@ -378,7 +378,7 @@ class AnthropicLLMLayer(LLMLayerProtocol):
                 messages=[{"role": "user", "content": prompt}],
             )
             lines = resp.content[0].text.strip().split("\n")
-            return [ln.lstrip("- ").strip() for ln in lines if ln.strip() and not ln.startswith("#")][:5]
+            return [ln.removeprefix("- ").strip() for ln in lines if ln.strip() and not ln.startswith("#")][:5]
         except Exception as exc:  # noqa: BLE001
             log.warning("llm.propose_invariants_failed", error=str(exc))
             return []
@@ -655,7 +655,7 @@ class OpenAICompatibleLLMLayer(LLMLayerProtocol):
                 messages=[{"role": "user", "content": prompt}],
             )
             lines = (resp.choices[0].message.content or "").strip().split("\n")
-            return [ln.lstrip("- ").strip() for ln in lines if ln.strip() and not ln.startswith("#")][:5]
+            return [ln.removeprefix("- ").strip() for ln in lines if ln.strip() and not ln.startswith("#")][:5]
         except Exception as exc:  # noqa: BLE001
             log.warning("llm.propose_invariants_failed", error=str(exc))
             return []
@@ -734,7 +734,7 @@ class OpenAICompatibleLLMLayer(LLMLayerProtocol):
                 messages=[{"role": "user", "content": prompt}],
             )
             lines = (resp.choices[0].message.content or "").strip().split("\n")
-            return [ln.lstrip("- ").strip() for ln in lines if ln.strip().startswith("-")][:3]
+            return [ln.removeprefix("- ").strip() for ln in lines if ln.strip().startswith("-")][:3]
         except Exception as exc:  # noqa: BLE001
             log.warning("llm.analyze_preconditions_failed", error=str(exc))
             return []

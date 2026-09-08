@@ -109,7 +109,6 @@ def _get_ollama_base_url(request: Request) -> str:
     session = request.app.state.server_state.get_active()
     if session and session.context and session.context.config.llm.base_url:
         url = session.context.config.llm.base_url.rstrip("/")
-        if url.endswith("/v1"):
-            url = url[:-3]
+        url = url.removesuffix("/v1")
         return url
     return "http://localhost:11434"

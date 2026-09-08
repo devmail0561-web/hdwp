@@ -34,9 +34,9 @@ _VERB_RISK: dict[str, tuple[PropertyType, float]] = {
 }
 
 # Pattern de path avec un paramètre {id} → endpoint sur une ressource individuelle
-_ID_PATH_RE = re.compile(r'\{[a-z_]*(?:id|uuid|slug|key|ref|hash)[a-z_]*\}', re.I)
+_ID_PATH_RE = re.compile(r'\{[a-z_]*(?:id|uuid|slug|key|ref|hash)[a-z_]*\}', re.IGNORECASE)
 # Aussi matcher les segments numériques pure (/{123}/) après normalisation
-_NUMERIC_PATH_RE = re.compile(r'/\{[a-z_]+\}', re.I)
+_NUMERIC_PATH_RE = re.compile(r'/\{[a-z_]+\}', re.IGNORECASE)
 
 
 class HttpSemanticsInference:

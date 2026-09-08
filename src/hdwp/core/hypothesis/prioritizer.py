@@ -33,6 +33,19 @@ class HypothesisPrioritizer:
         self._impact_weights: dict[PropertyType, float] = weights or _DEFAULT_WEIGHTS
         self._high_threshold = high_threshold
         self._medium_threshold = medium_threshold
+        # V4 Sprint 3 : boost ML par PropertyType (valeur str → facteur multiplicatif)
+        # Peuplé via set_ml_type_boosts() après prédictions VulnClassifier
+        self._ml_type_boosts: dict[str, float] = {}
+
+    def set_ml_type_boosts(self, boosts: dict[str, float]) -> None:
+        """
+        Définit les facteurs de boost ML par PropertyType.
+
+        boosts: {property_type_value → max_proba} — ex: {"authorization": 0.8}
+        Le score de priorité sera multiplié par (1.0 + proba) pour ce type.
+        Appelé par HDWPEngine après les prédictions VulnClassifier post-observation.
+        """
+        self._ml_type_boosts = dict(boosts)
 
     def compute_priority(
         self,
@@ -47,7 +60,11 @@ class HypothesisPrioritizer:
         obs_factor = min(1.0, observation_count / 5)
 
         # Floor raised to 0.25 so large APIs (many endpoints) can still reach HIGH priority
-        score = impact * max(surface, 0.25) * max(obs_factor, 0.1)
+        base_score = impact * max(surface, 0.25) * max(obs_factor, 0.1)
+
+        # V4 Sprint 3 : boost ML — augmente l'impact si VulnClassifier prédit ce type
+        ml_proba = self._ml_type_boosts.get(property_type.value, 0.0)
+        score = base_score * (1.0 + ml_proba)
 
         if score >= self._high_threshold:
             level = "HIGH"
@@ -56,9 +73,10 @@ class HypothesisPrioritizer:
         else:
             level = "LOW"
 
+        ml_note = f", ml_boost={ml_proba:.2f}" if ml_proba > 0.0 else ""
         rationale = (
             f"score={score:.2f} "
-            f"(impact={impact:.1f}, surface={surface:.2f}, obs_factor={obs_factor:.2f})"
+            f"(impact={impact:.1f}, surface={surface:.2f}, obs_factor={obs_factor:.2f}{ml_note})"
         )
         return level, rationale
 

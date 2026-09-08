@@ -36,8 +36,9 @@ def create_app() -> FastAPI:
     app.state.knowledge_base = KnowledgeBase()
 
     # Config LLM globale chargée depuis ~/.hdwp/llm_config.json
-    from hdwp.server.routes.llm import _LLM_CONFIG_PATH
     import json as _json
+
+    from hdwp.server.routes.llm import _LLM_CONFIG_PATH
     if _LLM_CONFIG_PATH.exists():
         try:
             app.state.llm_config = _json.loads(_LLM_CONFIG_PATH.read_text())
@@ -47,19 +48,19 @@ def create_app() -> FastAPI:
         app.state.llm_config = None
 
     # Routes API
+    from hdwp.server.routes.console import router as console_router
     from hdwp.server.routes.exploit import router as exploit_router
-    from hdwp.server.routes.payload import router as payload_router
     from hdwp.server.routes.findings import router as findings_router
     from hdwp.server.routes.flow import router as flow_router
     from hdwp.server.routes.health import router as health_router
     from hdwp.server.routes.knowledge import router as knowledge_router
     from hdwp.server.routes.llm import router as llm_router
     from hdwp.server.routes.models import router as models_router
+    from hdwp.server.routes.payload import router as payload_router
     from hdwp.server.routes.plugins import router as plugins_router
     from hdwp.server.routes.proxy import router as proxy_router
     from hdwp.server.routes.report import router as report_router
     from hdwp.server.routes.scan import router as scan_router
-    from hdwp.server.routes.console import router as console_router
     from hdwp.server.routes.script import router as script_router
     from hdwp.server.routes.session import router as session_router
     from hdwp.server.routes.state_route import router as state_router

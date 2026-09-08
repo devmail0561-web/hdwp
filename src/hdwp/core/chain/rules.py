@@ -22,7 +22,7 @@ from hdwp.core.model.schemas import (
 )
 
 if TYPE_CHECKING:
-    from hdwp.core.model.schemas import DataFlowMap, Finding
+    from hdwp.core.model.schemas import Finding
 
 MAX_PIVOT_CHAINS = 10
 

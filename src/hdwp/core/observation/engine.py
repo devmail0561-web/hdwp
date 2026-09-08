@@ -80,6 +80,7 @@ class ObservationEngine:
         if self._proxy_url:
             try:
                 from urllib.parse import urlparse as _urlparse
+
                 from hdwp.core.observation.spa_crawler import SPACrawler
                 port = _urlparse(self._proxy_url).port or 8080
                 spa = SPACrawler(

@@ -80,10 +80,16 @@ class TestSignalClassifier:
         c = SignalClassifier()
         assert c.classify(403, "", 100.0, 100.0) is SignalType.BLOCKED
 
-    def test_blocked_for_406_429_503(self):
+    def test_blocked_for_406_429(self):
         c = SignalClassifier()
-        for code in (406, 429, 503):
+        for code in (406, 429):
             assert c.classify(code, "", 100.0, 100.0) is SignalType.BLOCKED
+
+    def test_503_classified_as_error_not_blocked(self):
+        # 503 = erreur serveur (stack trace potentielle) — pas un blocage WAF
+        c = SignalClassifier()
+        body = "Service Unavailable\nTraceback (most recent call last):\n  File app.py"
+        assert c.classify(503, body, 100.0, 100.0) is SignalType.ERROR
 
     def test_error_for_500_with_stack_trace(self):
         c = SignalClassifier()

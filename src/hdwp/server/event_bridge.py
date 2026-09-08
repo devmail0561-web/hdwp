@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import structlog
+
 from hdwp.core.bus.event_bus import AsyncEventBus, HDWPEvent
 from hdwp.core.bus.events import ALL_EVENT_TYPES
 from hdwp.server.ws_manager import WebSocketManager

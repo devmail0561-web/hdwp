@@ -15,7 +15,6 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-import httpx
 import structlog
 
 from hdwp.core.context.config_schema import CredentialConfig, RoleConfig

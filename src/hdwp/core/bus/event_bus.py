@@ -71,11 +71,14 @@ class AsyncEventBus:
             if not future.done():
                 future.set_result(event)
 
-        # Support both batch and stream handlers
+        # If only stream handlers exist (no batch handler), bridge via temporary stream handler.
+        # Check BEFORE once() adds a batch handler and makes the condition always-False.
+        _has_batch = event_type in dict(self._emitter._events)
+        _has_stream_only = event_type in self._stream_handlers and not _has_batch
+
         self._emitter.once(event_type, _on_event)
 
-        # If only stream handlers exist, register temporary handler to capture event
-        if event_type in self._stream_handlers and event_type not in dict(self._emitter._events):
+        if _has_stream_only:
             async def _stream_capture(event: HDWPEvent) -> None:
                 if not future.done():
                     future.set_result(event)

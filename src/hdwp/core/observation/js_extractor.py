@@ -167,6 +167,7 @@ def _is_valid_path(path: str) -> bool:
 
 from dataclasses import dataclass
 
+
 @dataclass
 class DomSink:
     sink_type: str          # "innerHTML", "eval", "document.write", etc.
@@ -174,20 +175,20 @@ class DomSink:
     snippet: str            # 80 chars de contexte
 
 _DOM_SINK_PATTERNS: dict[str, re.Pattern] = {
-    "innerHTML":        re.compile(r'\.innerHTML\s*[+]?=\s*(.{1,80})', re.M),
-    "outerHTML":        re.compile(r'\.outerHTML\s*=\s*(.{1,80})', re.M),
-    "document.write":   re.compile(r'document\.write\s*\((.{1,80})\)', re.M),
-    "document.writeln": re.compile(r'document\.writeln\s*\((.{1,80})\)', re.M),
-    "eval":             re.compile(r'\beval\s*\((.{1,80})\)', re.M),
-    "setTimeout_str":   re.compile(r'setTimeout\s*\(\s*["\'](.{1,60})["\']', re.M),
-    "setInterval_str":  re.compile(r'setInterval\s*\(\s*["\'](.{1,60})["\']', re.M),
-    "location.href":    re.compile(r'location\.href\s*=\s*(.{1,80})', re.M),
-    "location.replace": re.compile(r'location\.replace\s*\((.{1,80})\)', re.M),
-    "location.hash":    re.compile(r'location\.hash', re.M),
-    "postMessage_listener": re.compile(r"addEventListener\s*\(\s*['\"]message['\"]", re.M),
-    "jquery.html":      re.compile(r'\$\s*\([^)]{1,60}\)\.html\s*\((.{1,60})\)', re.M),
-    "jquery.append":    re.compile(r'\$\s*\([^)]{1,60}\)\.(?:append|prepend|after|before)\s*\((.{1,60})\)', re.M),
-    "insertAdjacentHTML": re.compile(r'insertAdjacentHTML\s*\(\s*["\'][^"\']+["\']\s*,\s*(.{1,80})\)', re.M),
+    "innerHTML":        re.compile(r'\.innerHTML\s*[+]?=\s*(.{1,80})', re.MULTILINE),
+    "outerHTML":        re.compile(r'\.outerHTML\s*=\s*(.{1,80})', re.MULTILINE),
+    "document.write":   re.compile(r'document\.write\s*\((.{1,80})\)', re.MULTILINE),
+    "document.writeln": re.compile(r'document\.writeln\s*\((.{1,80})\)', re.MULTILINE),
+    "eval":             re.compile(r'\beval\s*\((.{1,80})\)', re.MULTILINE),
+    "setTimeout_str":   re.compile(r'setTimeout\s*\(\s*["\'](.{1,60})["\']', re.MULTILINE),
+    "setInterval_str":  re.compile(r'setInterval\s*\(\s*["\'](.{1,60})["\']', re.MULTILINE),
+    "location.href":    re.compile(r'location\.href\s*=\s*(.{1,80})', re.MULTILINE),
+    "location.replace": re.compile(r'location\.replace\s*\((.{1,80})\)', re.MULTILINE),
+    "location.hash":    re.compile(r'location\.hash', re.MULTILINE),
+    "postMessage_listener": re.compile(r"addEventListener\s*\(\s*['\"]message['\"]", re.MULTILINE),
+    "jquery.html":      re.compile(r'\$\s*\([^)]{1,60}\)\.html\s*\((.{1,60})\)', re.MULTILINE),
+    "jquery.append":    re.compile(r'\$\s*\([^)]{1,60}\)\.(?:append|prepend|after|before)\s*\((.{1,60})\)', re.MULTILINE),
+    "insertAdjacentHTML": re.compile(r'insertAdjacentHTML\s*\(\s*["\'][^"\']+["\']\s*,\s*(.{1,80})\)', re.MULTILINE),
 }
 
 # Patterns indiquant que le contenu vient d'une source utilisateur contrôlable
@@ -197,7 +198,7 @@ _USER_INPUT_SOURCES = re.compile(
     r'window\.name|'
     r'(?:get|query)Param|'
     r'(?:url|href|src|data)\s*[=:]\s*(?:req|request|params|query|input)',
-    re.I
+    re.IGNORECASE
 )
 
 

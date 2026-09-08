@@ -80,16 +80,20 @@ async def test_crawler_discovers_api_endpoints_from_html() -> None:
         max_pages=20,
     )
 
-    # Patcher httpx.AsyncClient dans le module active_crawler pour injecter
+    # Patcher build_client dans le module active_crawler pour injecter
     # le transport mock — le vrai crawler code s'exécute, seule la connexion réseau
-    # est interceptée.
-    OriginalClient = httpx.AsyncClient
+    # est interceptée. On neutralise aussi le proxy global pour éviter la pollution
+    # inter-tests (test_engine_create configure _active_proxy via HDWPEngine).
+    from contextlib import asynccontextmanager
 
-    def _patched_client(**kwargs: object) -> httpx.AsyncClient:
-        kwargs.pop("transport", None)
-        return OriginalClient(transport=transport, **kwargs)  # type: ignore[arg-type]
+    @asynccontextmanager
+    async def _mock_build_client(**kwargs: object):
+        kwargs.pop("proxy", None)
+        kwargs.pop("proxy_url", None)
+        async with httpx.AsyncClient(transport=transport, **kwargs) as client:  # type: ignore[arg-type]
+            yield client
 
-    with patch("hdwp.core.observation.active_crawler.httpx.AsyncClient", _patched_client):
+    with patch("hdwp.core.http_client.build_client", _mock_build_client):
         await crawler.crawl(BASE_URL + "/")
 
     await bus.drain()

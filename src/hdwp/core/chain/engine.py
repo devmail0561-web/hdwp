@@ -4,8 +4,8 @@
 """ChainEngine : corrèle les findings confirmés et génère des chaînes d'attaque."""
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -250,12 +250,11 @@ class ChainEngine:
 
         Fallback utilisé quand le moteur n'est plus en mémoire (session reprise).
         """
+        import base64
         import time
-        import httpx
+
         from hdwp.core.model.schemas import ExperimentResult, ExperimentSpec, generate_id
         from hdwp.core.observation.normalizer import normalize_response
-
-        import base64
         auth_headers: dict = {}
         if role_name != "anonymous":
             for role in self._roles:

@@ -29,8 +29,12 @@ async def start_scan(request: Request) -> ScanStatusResponse:
 
     # Mise à jour de la phase en temps réel depuis les événements du bus
     from hdwp.core.bus.events import (
-        EXPERIMENT_RESULT, FINDING_CONFIRMED, HYPOTHESIS_GENERATED,
-        MODEL_UPDATED, OBSERVATION_RAW, PROPERTY_INFERRED,
+        EXPERIMENT_RESULT,
+        FINDING_CONFIRMED,
+        HYPOTHESIS_GENERATED,
+        MODEL_UPDATED,
+        OBSERVATION_RAW,
+        PROPERTY_INFERRED,
     )
     _PHASE_MAP = {
         OBSERVATION_RAW:     "OBSERVE",
@@ -41,7 +45,7 @@ async def start_scan(request: Request) -> ScanStatusResponse:
         FINDING_CONFIRMED:   "FINDING",
     }
     for _evt, _phase in _PHASE_MAP.items():
-        async def _phase_handler(event, p=_phase, e=_evt) -> None:  # noqa: ARG001
+        async def _phase_handler(event, p=_phase, e=_evt) -> None:
             session.phase = p
             if e == FINDING_CONFIRMED:
                 session.findings_count += 1
@@ -88,7 +92,7 @@ async def start_scan(request: Request) -> ScanStatusResponse:
             # Handler : ouvrir le navigateur sur la cible quand auth requise
             from hdwp.core.bus.events import AUTH_REQUIRED as _AUTH_REQ
 
-            async def _on_auth_required(event) -> None:  # noqa: ARG001
+            async def _on_auth_required(event) -> None:
                 if session.proxy_active:
                     import webbrowser
                     webbrowser.open(session.target_url)

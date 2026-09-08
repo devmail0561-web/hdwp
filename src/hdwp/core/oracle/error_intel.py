@@ -34,89 +34,89 @@ class ErrorIntel:
 
 _DB_PATTERNS: dict[str, list[re.Pattern]] = {
     "db:mysql": [
-        re.compile(r"You have an error in your SQL syntax", re.I),
-        re.compile(r"MySQL server version", re.I),
-        re.compile(r"mysql_fetch_array\(\)", re.I),
-        re.compile(r"SQLSTATE\[HY\d+\].*MySQL", re.I),
+        re.compile(r"You have an error in your SQL syntax", re.IGNORECASE),
+        re.compile(r"MySQL server version", re.IGNORECASE),
+        re.compile(r"mysql_fetch_array\(\)", re.IGNORECASE),
+        re.compile(r"SQLSTATE\[HY\d+\].*MySQL", re.IGNORECASE),
     ],
     "db:postgresql": [
-        re.compile(r"PG::", re.I),
-        re.compile(r"PostgreSQL.*ERROR", re.I),
-        re.compile(r'ERROR:.*syntax error at or near "', re.I),
-        re.compile(r"relation .* does not exist", re.I),
+        re.compile(r"PG::", re.IGNORECASE),
+        re.compile(r"PostgreSQL.*ERROR", re.IGNORECASE),
+        re.compile(r'ERROR:.*syntax error at or near "', re.IGNORECASE),
+        re.compile(r"relation .* does not exist", re.IGNORECASE),
     ],
     "db:oracle": [
-        re.compile(r"ORA-\d{4,}", re.I),
-        re.compile(r"Oracle.*Database.*Error", re.I),
+        re.compile(r"ORA-\d{4,}", re.IGNORECASE),
+        re.compile(r"Oracle.*Database.*Error", re.IGNORECASE),
     ],
     "db:mssql": [
-        re.compile(r"Microsoft SQL Server", re.I),
-        re.compile(r"Incorrect syntax near", re.I),
-        re.compile(r"Unclosed quotation mark after the character string", re.I),
+        re.compile(r"Microsoft SQL Server", re.IGNORECASE),
+        re.compile(r"Incorrect syntax near", re.IGNORECASE),
+        re.compile(r"Unclosed quotation mark after the character string", re.IGNORECASE),
     ],
     "db:sqlite": [
-        re.compile(r"SQLiteException", re.I),
-        re.compile(r"sqlite3\.OperationalError", re.I),
-        re.compile(r"no such table", re.I),
+        re.compile(r"SQLiteException", re.IGNORECASE),
+        re.compile(r"sqlite3\.OperationalError", re.IGNORECASE),
+        re.compile(r"no such table", re.IGNORECASE),
     ],
     "db:mongodb": [
-        re.compile(r"MongoError", re.I),
-        re.compile(r"BSONTypeError", re.I),
-        re.compile(r"E11000 duplicate key", re.I),
+        re.compile(r"MongoError", re.IGNORECASE),
+        re.compile(r"BSONTypeError", re.IGNORECASE),
+        re.compile(r"E11000 duplicate key", re.IGNORECASE),
     ],
 }
 
 _FRAMEWORK_PATTERNS: dict[str, list[re.Pattern]] = {
     "framework:django": [
-        re.compile(r"Django.*Exception|Django.*Error", re.I),
-        re.compile(r"DJANGO_SETTINGS_MODULE", re.I),
-        re.compile(r'File ".*django.*\.py", line \d+', re.I),
+        re.compile(r"Django.*Exception|Django.*Error", re.IGNORECASE),
+        re.compile(r"DJANGO_SETTINGS_MODULE", re.IGNORECASE),
+        re.compile(r'File ".*django.*\.py", line \d+', re.IGNORECASE),
     ],
     "framework:rails": [
-        re.compile(r"ActionController.*Error", re.I),
-        re.compile(r"ActiveRecord.*Error", re.I),
-        re.compile(r'\.rb:\d+:in `', re.I),
+        re.compile(r"ActionController.*Error", re.IGNORECASE),
+        re.compile(r"ActiveRecord.*Error", re.IGNORECASE),
+        re.compile(r'\.rb:\d+:in `', re.IGNORECASE),
     ],
     "framework:spring": [
-        re.compile(r"org\.springframework\.", re.I),
-        re.compile(r"HibernateException", re.I),
-        re.compile(r"at org\.spring", re.I),
+        re.compile(r"org\.springframework\.", re.IGNORECASE),
+        re.compile(r"HibernateException", re.IGNORECASE),
+        re.compile(r"at org\.spring", re.IGNORECASE),
     ],
     "framework:flask": [
-        re.compile(r"werkzeug\.exceptions\.", re.I),
-        re.compile(r"flask\.exceptions\.", re.I),
-        re.compile(r'File ".*flask.*\.py", line \d+', re.I),
+        re.compile(r"werkzeug\.exceptions\.", re.IGNORECASE),
+        re.compile(r"flask\.exceptions\.", re.IGNORECASE),
+        re.compile(r'File ".*flask.*\.py", line \d+', re.IGNORECASE),
     ],
     "framework:laravel": [
-        re.compile(r"Illuminate\\", re.I),
-        re.compile(r"Laravel.*Whoops", re.I),
+        re.compile(r"Illuminate\\", re.IGNORECASE),
+        re.compile(r"Laravel.*Whoops", re.IGNORECASE),
     ],
     "framework:php": [
-        re.compile(r"Fatal error:.*on line \d+", re.I),
-        re.compile(r"Parse error:.*PHP", re.I),
-        re.compile(r"Warning:.*PHP", re.I),
+        re.compile(r"Fatal error:.*on line \d+", re.IGNORECASE),
+        re.compile(r"Parse error:.*PHP", re.IGNORECASE),
+        re.compile(r"Warning:.*PHP", re.IGNORECASE),
     ],
     "framework:java": [
-        re.compile(r"java\.lang\.(RuntimeException|NullPointerException|Exception)", re.I),
+        re.compile(r"java\.lang\.(RuntimeException|NullPointerException|Exception)", re.IGNORECASE),
         re.compile(r"at [\w\.]+\([\w]+\.java:\d+\)"),
     ],
 }
 
 _FILE_PATH_RE = re.compile(
     r'(?:File|in)\s+"?(/[^\s"\'<>]+\.(?:py|rb|java|php|js|ts|cs|go))"?',
-    re.I
+    re.IGNORECASE
 )
 _TABLE_RE = re.compile(
     r"(?:table|relation|column)\s+['\"`]?([\w_]+)['\"`]?\s+(?:doesn't exist|does not exist|not found|no such)",
-    re.I
+    re.IGNORECASE
 )
 _COLUMN_RE = re.compile(
     r"Unknown column '([\w_]+)' in|column \"([\w_]+)\" of relation",
-    re.I
+    re.IGNORECASE
 )
 _SERVER_VERSION_RE = re.compile(
     r"(?:Server|MySQL|PostgreSQL|Oracle)\s+[Vv]ersion[:\s]+(\d+[\.\d]+)",
-    re.I
+    re.IGNORECASE
 )
 
 

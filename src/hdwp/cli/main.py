@@ -387,7 +387,6 @@ def knowledge(
                 console.print(f"[green]{len(sigs)} signature(s) CVE exportée(s) → {output}[/green]")
 
             case "refresh-cves":
-                from hdwp.core.observation.version_scanner import scan_backend_cves
                 # Utiliser le tech_stack et detected_versions depuis la dernière session
                 # (nécessite une cible — utiliser un scan récent ou passer --target)
                 console.print("[yellow]Fonctionnalité disponible pendant un scan actif ou "
@@ -405,7 +404,7 @@ def knowledge(
 
 
 @app.command("install-ca")
-def install_ca(  # noqa: D103
+def install_ca(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Afficher les détails"),
 ) -> None:
     """Installe le certificat CA HDWP dans tous les navigateurs détectés (Chrome, Firefox, système)."""

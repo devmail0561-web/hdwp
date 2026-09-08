@@ -36,20 +36,20 @@ _JWT_RE = re.compile(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{
 # ── Signaux technologiques dans les erreurs ───────────────────────────────────
 
 _ERROR_TECH_MAP: dict[str, list[re.Pattern]] = {
-    "db:oracle":    [re.compile(r'ORA-\d+', re.I), re.compile(r'Oracle.*SQL', re.I)],
-    "db:mysql":     [re.compile(r'MySQL.*error', re.I), re.compile(r"You have an error.*SQL syntax", re.I)],
-    "db:mssql":     [re.compile(r'Microsoft SQL Server', re.I), re.compile(r'Incorrect syntax near', re.I)],
-    "db:pgsql":     [re.compile(r'PostgreSQL.*ERROR', re.I), re.compile(r'PG::', re.I)],
-    "db:sqlite":    [re.compile(r'SQLite.*error', re.I), re.compile(r'no such column', re.I)],
-    "db:mongodb":   [re.compile(r'MongoError', re.I), re.compile(r'BSONTypeError', re.I)],
-    "framework:django":  [re.compile(r'Django.*Exception', re.I), re.compile(r'DJANGO_SETTINGS_MODULE')],
-    "framework:laravel": [re.compile(r'Illuminate\\', re.I), re.compile(r'Laravel.*Whoops', re.I)],
-    "framework:rails":   [re.compile(r'ActionController', re.I), re.compile(r'Ruby on Rails', re.I)],
-    "framework:spring":  [re.compile(r'org\.springframework', re.I), re.compile(r'HibernateException', re.I)],
-    "framework:flask":   [re.compile(r'flask\.exceptions', re.I), re.compile(r'Werkzeug Debugger', re.I)],
-    "framework:php":     [re.compile(r'Fatal error.*PHP', re.I), re.compile(r'Parse error.*PHP', re.I)],
-    "framework:java":    [re.compile(r'java\.lang\.', re.I), re.compile(r'at .*\.java:\d+')],
-    "framework:aspnet":  [re.compile(r'System\.Web\.', re.I), re.compile(r'ASP\.NET', re.I)],
+    "db:oracle":    [re.compile(r'ORA-\d+', re.IGNORECASE), re.compile(r'Oracle.*SQL', re.IGNORECASE)],
+    "db:mysql":     [re.compile(r'MySQL.*error', re.IGNORECASE), re.compile(r"You have an error.*SQL syntax", re.IGNORECASE)],
+    "db:mssql":     [re.compile(r'Microsoft SQL Server', re.IGNORECASE), re.compile(r'Incorrect syntax near', re.IGNORECASE)],
+    "db:pgsql":     [re.compile(r'PostgreSQL.*ERROR', re.IGNORECASE), re.compile(r'PG::', re.IGNORECASE)],
+    "db:sqlite":    [re.compile(r'SQLite.*error', re.IGNORECASE), re.compile(r'no such column', re.IGNORECASE)],
+    "db:mongodb":   [re.compile(r'MongoError', re.IGNORECASE), re.compile(r'BSONTypeError', re.IGNORECASE)],
+    "framework:django":  [re.compile(r'Django.*Exception', re.IGNORECASE), re.compile(r'DJANGO_SETTINGS_MODULE')],
+    "framework:laravel": [re.compile(r'Illuminate\\', re.IGNORECASE), re.compile(r'Laravel.*Whoops', re.IGNORECASE)],
+    "framework:rails":   [re.compile(r'ActionController', re.IGNORECASE), re.compile(r'Ruby on Rails', re.IGNORECASE)],
+    "framework:spring":  [re.compile(r'org\.springframework', re.IGNORECASE), re.compile(r'HibernateException', re.IGNORECASE)],
+    "framework:flask":   [re.compile(r'flask\.exceptions', re.IGNORECASE), re.compile(r'Werkzeug Debugger', re.IGNORECASE)],
+    "framework:php":     [re.compile(r'Fatal error.*PHP', re.IGNORECASE), re.compile(r'Parse error.*PHP', re.IGNORECASE)],
+    "framework:java":    [re.compile(r'java\.lang\.', re.IGNORECASE), re.compile(r'at .*\.java:\d+')],
+    "framework:aspnet":  [re.compile(r'System\.Web\.', re.IGNORECASE), re.compile(r'ASP\.NET', re.IGNORECASE)],
 }
 
 

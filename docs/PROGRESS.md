@@ -1,6 +1,6 @@
 # Progression de l'implémentation — HDWP Engine
 
-Dernière mise à jour : 2026-09-07
+Dernière mise à jour : 2026-09-08
 
 ---
 
@@ -22,9 +22,20 @@ Apprentissage adaptatif                [DONE] ███████████�
 V3 Sprint 1  Reasoning Foundation      [DONE] ████████████████████ 100%
 V3 Sprint 2  Enriched Oracle           [DONE] ████████████████████ 100%
 V3 UI Sync + Proxy fixes               [DONE] ████████████████████ 100%
+V4 Sprint 1 ML Foundation Layer        [DONE] ████████████████████ 100%
+V4 Sprint 2 OracleModel Phase 1        [DONE] ████████████████████ 100%
+V4 Sprint 3 VulnClassifier Phase 2     [DONE] ████████████████████ 100%
+V4 Sprint 4 PayloadOptimizer Phase 3   [DONE] ████████████████████ 100%
+V4 Sprint 5 ActiveLearner Phase 4      [DONE] ████████████████████ 100%
+V4 Sprint 6 SimilarityIndex Phase 5    [DONE] ████████████████████ 100%
+V4 Sprint 7 EndpointClusterer Phase 6 [DONE] ████████████████████ 100%
+V4 Sprint 8 FeedbackLoop Phase 7      [DONE] ████████████████████ 100%
+V4 Sprint 9 CrossSessionTransfer      [DONE] ████████████████████ 100%
+V4 Sprint 10 MetaLearner              [DONE] ████████████████████ 100%
+V4 Sprint 11 ExplainabilityLayer      [DONE] ████████████████████ 100%
 ```
 
-**Version : 3.0.0** | Fichiers source Python : ~110 | Composants TypeScript : 12 stores/hooks/composants v3
+**Version : 4.0.0-sprint11** | Fichiers source Python : ~120 | Composants TypeScript : 12 stores/hooks/composants v3
 
 ---
 
@@ -151,6 +162,49 @@ V3 UI Sync + Proxy fixes               [DONE] ███████████�
 ---
 
 ## Dernière implémentation
+
+**V4 Sprint 11 — ExplainabilityLayer** — Transparence du verdict de confiance :
+- `FindingExplanation` schema : v1/v2/ml scores, 10D signals, top contributors triés par |contribution|, verdict rationale
+- `SignalContribution` schema : dimension, raw_value, weight, contribution (w×x), label FR
+- `ConfidenceModelV2.explain(features)` : décompose le score en contributions par dimension, triées
+- `_DIMENSION_LABELS` : labels FR pour les 10 dimensions V2
+- `_build_finding()` enrichi : construit l'explication à partir des signaux V3 quand disponibles
+- Rapport Markdown : section "Analyse de confiance" avec tableau V1/V2/ML, tableau des top contributors
+- Export JSON : `explained_count` et `top_contributing_signals` dans le summary
+- Frontend : types `SignalContribution`, `FindingExplanation` ajoutés, `ConfidenceBreakdown` complété (v2_boost, ml_boost)
+- 22 nouveaux tests → **1112 tests passants**
+
+**V4 Sprint 3 — VulnClassifier Phase 2** — Classifieur multi-label sur EndpointEmbeddings :
+- `core/ml/models/vuln_classifier.py` : `VulnClassifier` (MultiOutputClassifier/RandomForest, 9 vuln types)
+- 9 types couverts : `bola`, `authz`, `jwt`, `cors`, `sqli`, `xss`, `ssrf`, `path_traversal`, `http_smuggling`
+- `VULN_TO_PROPERTY_TYPE` : mapping vuln → PropertyType pour l'agrégation
+- `property_type_boosts()` : agrège P(vuln) par PropertyType → facteur de boost
+- `HypothesisPrioritizer.set_ml_type_boosts()` : applique le boost ML au score de priorité
+- `KnowledgeBase.train_vuln_model()` : entraînement à la demande depuis `training_samples_vuln`
+- `HDWPEngine` câblé : chargement VulnClassifier au démarrage, prédictions post-observation, collecte vuln samples depuis confirmed findings, réentraînement fin de session
+- `ML_VULN_PREDICTED` event émis par endpoint après prédiction
+- Dégradation silencieuse si scikit-learn non installé
+- 23 nouveaux tests → **862 tests passants**
+
+**V4 Sprint 2 — OracleModel Phase 1** — MLP entraîné sur DiffEmbeddings :
+- `core/ml/models/oracle_model.py` : `OracleModel` (MLP 256-128-64, scikit-learn)
+- Entraînement auto après `MIN_SAMPLES_FOR_TRAINING=30` samples accumulés
+- Persistance joblib dans `~/.hdwp/oracle_model.joblib`
+- Intégration dans `SemanticOracle` : A/B avec V2 (`max(V2, OracleModel)`)
+- Chargement depuis disque au démarrage de `HDWPEngine`
+- Cycle réentraînement dans `run()` après chaque session
+- `ML_MODEL_RETRAINED` event émis après entraînement
+- `kb.train_oracle_model()` méthode publique
+- 19 nouveaux tests → **838 tests passants**
+
+**V4 Sprint 1 — ML Foundation Layer** — Infrastructure d'apprentissage posée :
+- Package `core/ml/embedders/` : `ResponseEmbedder` (22D), `EndpointEmbedder` (30D), `DiffEmbedder` (51D) — pure Python, 0 dépendances externes
+- `KnowledgeBase` v4 : 3 nouvelles tables SQLite (`training_samples_oracle`, `training_samples_vuln`, `finding_embeddings`) + méthodes store/get
+- `ConfidenceModelV2` câblée dans `SemanticOracle` : 4 handlers V3 (temporal, crossrole, invariant, WAF bypass), bloc V2 dans `_evaluate_hypothesis`, éviction mémoire
+- Événement `ML_ORACLE_VERDICT` émis à chaque évaluation d'hypothèse
+- Pipeline de collecte dans `HDWPEngine.run()` : `store_oracle_samples_from_session()` (conditionnel, `ImportError`-safe)
+- Groupe `[ml]` ajouté à `pyproject.toml` pour Sprint 2 (OracleModel MLP via scikit-learn)
+- 328 nouveaux tests (328 total sprint) → **819 tests passants**
 
 **Apprentissage adaptatif** — Le moteur adapte désormais son comportement au fil des sessions :
 - Classification de cible (`api`, `cms`, `spa`, `graphql`) pour poids per-target

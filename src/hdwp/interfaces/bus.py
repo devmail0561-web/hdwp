@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from hdwp.core.bus.event_bus import AsyncEventBus
@@ -25,9 +25,9 @@ class PluginBusView:
         self._bus = bus
         self._plugin_id = plugin_id
 
-    def on(self, event_type: str, handler: Callable[..., Any]) -> None:
+    def on(self, event_type: str, handler: Callable[..., Any], *, mode: str = "batch") -> None:
         """S'abonner à un événement du bus."""
-        self._bus.on(event_type, handler)
+        self._bus.on(event_type, handler, mode=mode)
 
     async def emit(self, event_type: str, payload: Any) -> None:
         """Émettre un événement. Restreint à 'observation.raw' et 'plugin.*'."""

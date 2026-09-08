@@ -9,13 +9,9 @@ import threading
 import time
 import urllib.parse
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import httpx
 import structlog
-
-if TYPE_CHECKING:
-    pass
 
 log = structlog.get_logger()
 

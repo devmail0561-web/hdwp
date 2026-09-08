@@ -11,7 +11,6 @@ import re
 import uuid
 from typing import TYPE_CHECKING
 
-import httpx
 import structlog
 
 if TYPE_CHECKING:
@@ -293,7 +292,6 @@ async def scan_backend_cves(
     Mode offline : charge depuis offline_db_path (JSON) au lieu d'interroger OSV.
     """
     import json
-    import time
 
     if offline_db_path:
         try:
@@ -340,9 +338,7 @@ async def scan_backend_cves(
                 cvss = 0.0
                 for sev in vuln.get("severity", []):
                     score = sev.get("score", "")
-                    if isinstance(score, (int, float)):
-                        cvss = max(cvss, float(score))
-                    elif isinstance(score, str) and score.replace(".", "").isdigit():
+                    if isinstance(score, (int, float)) or isinstance(score, str) and score.replace(".", "").isdigit():
                         cvss = max(cvss, float(score))
 
                 fixed = ""
@@ -399,15 +395,15 @@ def extract_framework_versions(
         h = header_name.lower()
         if h in ("x-powered-by", "server"):
             # PHP/8.1.2
-            m = re.search(r'php/(\d+\.\d+[\.\d]*)', header_val, re.I)
+            m = re.search(r'php/(\d+\.\d+[\.\d]*)', header_val, re.IGNORECASE)
             if m:
                 versions["framework:php"] = m.group(1)
             # gunicorn/21.2.0
-            m = re.search(r'gunicorn/(\d+\.\d+[\.\d]*)', header_val, re.I)
+            m = re.search(r'gunicorn/(\d+\.\d+[\.\d]*)', header_val, re.IGNORECASE)
             if m:
                 versions["server:gunicorn"] = m.group(1)
             # Express (version rarement dans le header, mais parfois)
-            m = re.search(r'express/(\d+\.\d+[\.\d]*)', header_val, re.I)
+            m = re.search(r'express/(\d+\.\d+[\.\d]*)', header_val, re.IGNORECASE)
             if m:
                 versions["framework:express"] = m.group(1)
 

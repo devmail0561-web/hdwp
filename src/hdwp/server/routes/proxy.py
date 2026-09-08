@@ -74,7 +74,7 @@ async def get_ca_cert() -> dict:
 
 
 @router.post("/proxy/install-ca")
-async def install_ca_cert(request: Request) -> dict:  # noqa: ARG001
+async def install_ca_cert(request: Request) -> dict:
     """Installe le certificat CA HDWP dans tous les navigateurs détectés."""
     from hdwp.core.observation.ca_installer import install_ca_everywhere
     from hdwp.core.observation.hdwp_proxy import CA_CERT_PATH

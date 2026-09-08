@@ -8,7 +8,6 @@ import time
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter()
@@ -90,9 +89,9 @@ def _build_export(method: str, url: str, auth_headers: dict, params: dict, body:
 
     headers_repr = repr(safe_headers)
     if body:
-        py = f"import httpx\nr = httpx.{method.lower()}(\"{full_url}\", headers={headers_repr}, json={repr(body)})\nprint(r.status_code, r.text[:200])"
+        py = f"import httpx\nr = httpx.{method.lower()}(\"{full_url}\", headers={headers_repr}, json={body!r})\nprint(r.status_code, r.text[:200])"
     elif params:
-        py = f"import httpx\nr = httpx.{method.lower()}(\"{url}\", params={repr(params)}, headers={headers_repr})\nprint(r.status_code, r.text[:200])"
+        py = f"import httpx\nr = httpx.{method.lower()}(\"{url}\", params={params!r}, headers={headers_repr})\nprint(r.status_code, r.text[:200])"
     else:
         py = f"import httpx\nr = httpx.{method.lower()}(\"{full_url}\", headers={headers_repr})\nprint(r.status_code, r.text[:200])"
 

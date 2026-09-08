@@ -9,9 +9,7 @@ from hdwp.core.model.schemas import (
     ExperimentSpec,
     Hypothesis,
     NormalizedRequest,
-    PropertyType,
     SecurityProperty,
-    generate_id,
 )
 from hdwp.plugins.base import HDWPPlugin
 

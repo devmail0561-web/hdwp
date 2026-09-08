@@ -25,7 +25,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from hdwp.core.knowledge.models import PatternStatsRecord, SessionMetaRecord
+from hdwp.core.knowledge.models import (
+    FindingEmbeddingRecord,
+    PatternStatsRecord,
+    PayloadOptimizerStatRecord,
+    SessionMetaRecord,
+    TrainingSampleOracleRecord,
+    TrainingSampleVulnRecord,
+)
 
 if TYPE_CHECKING:
     from hdwp.core.model.schemas import ApplicationModelData, Finding
@@ -86,7 +93,14 @@ class KnowledgeBase:
             self._engine = create_async_engine(url, echo=False)
             async with self._engine.begin() as conn:
                 await conn.run_sync(SQLModel.metadata.create_all)
-            await self._migrate_schema(self._engine)
+            try:
+                await self._migrate_schema(self._engine)
+            except Exception as _mig_exc:
+                log.warning(
+                    "knowledge.migration_nonfatal",
+                    error=str(_mig_exc),
+                    note="engine starts without historical stats",
+                )
         return self._engine
 
     async def _migrate_schema(self, engine: AsyncEngine) -> None:
@@ -136,8 +150,15 @@ class KnowledgeBase:
                     await conn.execute(
                         text("ALTER TABLE pattern_stats_new RENAME TO pattern_stats")
                     )
-                except Exception:
-                    pass
+                except Exception as _mig_exc:
+                    # Re-raise pour que engine.begin() rollback la transaction entière.
+                    # Sans ça, un DROP TABLE réussi + RENAME échoué détruit les stats.
+                    log.error(
+                        "knowledge.migration_critical",
+                        error=str(_mig_exc),
+                        note="transaction will rollback — pattern_stats preserved",
+                    )
+                    raise
 
             # Table vuln_signatures pour les CVE/GHSA récupérés depuis OSV.dev/NVD
             try:
@@ -157,9 +178,80 @@ class KnowledgeBase:
             except Exception:
                 pass
 
+            # finding_embeddings.confidence added in sprint 6 — migrate existing DBs
+            try:
+                await conn.execute(
+                    text("ALTER TABLE finding_embeddings ADD COLUMN confidence REAL DEFAULT 1.0")
+                )
+            except Exception:
+                pass
+
+            # ── V4 ML tables ─────────────────────────────────────────────────
+            for tbl_sql in [
+                """CREATE TABLE IF NOT EXISTS training_samples_oracle (
+                    id TEXT PRIMARY KEY,
+                    diff_embedding TEXT DEFAULT '',
+                    mutation_type TEXT DEFAULT '',
+                    verdict TEXT DEFAULT '',
+                    human_validated INTEGER DEFAULT 0,
+                    session_id TEXT DEFAULT '',
+                    created_at TEXT DEFAULT ''
+                )""",
+                """CREATE TABLE IF NOT EXISTS training_samples_vuln (
+                    id TEXT PRIMARY KEY,
+                    endpoint_embedding TEXT DEFAULT '',
+                    vuln_labels TEXT DEFAULT '',
+                    session_id TEXT DEFAULT '',
+                    created_at TEXT DEFAULT ''
+                )""",
+                """CREATE TABLE IF NOT EXISTS finding_embeddings (
+                    finding_id TEXT PRIMARY KEY,
+                    embedding TEXT DEFAULT '',
+                    vuln_class TEXT DEFAULT '',
+                    session_id TEXT DEFAULT '',
+                    confidence REAL DEFAULT 1.0
+                )""",
+                """CREATE TABLE IF NOT EXISTS payload_optimizer_stats (
+                    fingerprint TEXT NOT NULL,
+                    mutation_type TEXT NOT NULL,
+                    alpha REAL NOT NULL DEFAULT 1.0,
+                    beta REAL NOT NULL DEFAULT 1.0,
+                    pulls INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (fingerprint, mutation_type)
+                )""",
+                """CREATE TABLE IF NOT EXISTS endpoint_clusters (
+                    id TEXT PRIMARY KEY,
+                    k INTEGER DEFAULT 8,
+                    n_samples INTEGER DEFAULT 0,
+                    centroids TEXT DEFAULT '',
+                    trained_at TEXT DEFAULT ''
+                )""",
+                """CREATE TABLE IF NOT EXISTS feedback_weights (
+                    id TEXT PRIMARY KEY,
+                    weights TEXT DEFAULT '',
+                    bias REAL DEFAULT -4.0,
+                    n_updates INTEGER DEFAULT 0,
+                    updated_at TEXT DEFAULT ''
+                )""",
+                """CREATE TABLE IF NOT EXISTS feedback_weights_history (
+                    target_hash TEXT NOT NULL,
+                    target_type TEXT NOT NULL DEFAULT 'unknown',
+                    weights TEXT DEFAULT '',
+                    bias REAL DEFAULT -4.0,
+                    n_updates INTEGER DEFAULT 0,
+                    updated_at TEXT DEFAULT '',
+                    PRIMARY KEY (target_hash)
+                )""",
+            ]:
+                try:
+                    await conn.execute(text(tbl_sql))
+                except Exception:
+                    pass
+
     async def upsert_vuln_signatures(self, sigs: list[dict]) -> int:
         """Persiste des signatures CVE/GHSA dans la knowledge base. Retourne le nombre upserted."""
         from datetime import UTC, datetime
+
         from hdwp.core.knowledge.models import VulnSignatureRecord
 
         if not sigs:
@@ -469,6 +561,525 @@ class KnowledgeBase:
         if self._engine:
             await self._engine.dispose()
             self._engine = None
+
+    # ── V4 ML data collection ────────────────────────────────────────────────
+
+    async def store_oracle_sample(
+        self,
+        diff_embedding: list[float],
+        mutation_type: str,
+        verdict: str,
+        session_id: str,
+        human_validated: bool = False,
+    ) -> None:
+        """Persiste un échantillon d'entraînement pour l'OracleModel."""
+        import json
+
+        from hdwp.core.model.schemas import generate_id
+
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            rec = TrainingSampleOracleRecord(
+                id=generate_id("OTRN"),
+                diff_embedding=json.dumps(diff_embedding),
+                mutation_type=mutation_type,
+                verdict=verdict,
+                human_validated=human_validated,
+                session_id=session_id,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            session.add(rec)
+            await session.commit()
+
+    async def store_vuln_sample(
+        self,
+        endpoint_embedding: list[float],
+        vuln_labels: dict[str, float],
+        session_id: str,
+    ) -> None:
+        """Persiste un échantillon d'entraînement pour VulnPredictionModel."""
+        import json
+
+        from hdwp.core.model.schemas import generate_id
+
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            rec = TrainingSampleVulnRecord(
+                id=generate_id("VTRN"),
+                endpoint_embedding=json.dumps(endpoint_embedding),
+                vuln_labels=json.dumps(vuln_labels),
+                session_id=session_id,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            session.add(rec)
+            await session.commit()
+
+    async def get_finding_embeddings(self) -> list[dict[str, Any]]:
+        """Retourne tous les embeddings de findings confirmés pour le SimilarityIndex."""
+        import json
+
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            result = await session.exec(select(FindingEmbeddingRecord))
+            records = result.all()
+        return [
+            {
+                "finding_id": r.finding_id,
+                "embedding": json.loads(r.embedding) if r.embedding else [],
+                "vuln_class": r.vuln_class,
+                "session_id": r.session_id,
+                "confidence": r.confidence,
+            }
+            for r in records
+            if r.embedding
+        ]
+
+    async def store_finding_embedding(
+        self,
+        finding_id: str,
+        embedding: list[float],
+        vuln_class: str,
+        session_id: str,
+        confidence: float = 1.0,
+    ) -> None:
+        """Persiste l'embedding d'un finding confirmé pour VulnEmbeddingSpace."""
+        import json
+
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            rec = FindingEmbeddingRecord(
+                finding_id=finding_id,
+                embedding=json.dumps(embedding),
+                vuln_class=vuln_class,
+                session_id=session_id,
+                confidence=confidence,
+            )
+            # Upsert : remplace si finding_id existe déjà
+            existing = await session.get(FindingEmbeddingRecord, finding_id)
+            if existing:
+                existing.embedding = rec.embedding
+                existing.vuln_class = rec.vuln_class
+                existing.confidence = rec.confidence
+                session.add(existing)
+            else:
+                session.add(rec)
+            await session.commit()
+
+    async def store_cluster_centroids(
+        self,
+        centroids: list[list[float]],
+        k: int,
+        n_samples: int,
+    ) -> None:
+        """Persiste les centroïdes du EndpointClusterer (upsert sur id='current')."""
+        import json
+        from datetime import UTC, datetime
+
+        engine = await self._get_engine()
+        async with engine.begin() as conn:
+            now = datetime.now(UTC).isoformat()
+            await conn.execute(
+                text("""
+                    INSERT INTO endpoint_clusters (id, k, n_samples, centroids, trained_at)
+                    VALUES ('current', :k, :n, :c, :ts)
+                    ON CONFLICT(id) DO UPDATE SET
+                        k=excluded.k, n_samples=excluded.n_samples,
+                        centroids=excluded.centroids, trained_at=excluded.trained_at
+                """),
+                {"k": k, "n": n_samples, "c": json.dumps(centroids), "ts": now},
+            )
+
+    async def get_cluster_centroids(self) -> dict | None:
+        """Retourne les données de clustering persistées, ou None si absentes."""
+        import json
+
+        engine = await self._get_engine()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text("SELECT k, n_samples, centroids, trained_at FROM endpoint_clusters WHERE id='current'")
+            )
+            row = result.fetchone()
+            if row is None:
+                return None
+            centroids_raw = row[2]
+            if not centroids_raw:
+                return None
+            try:
+                centroids = json.loads(centroids_raw)
+            except Exception:
+                return None
+            return {
+                "k": row[0],
+                "n_samples": row[1],
+                "centroids": centroids,
+                "trained_at": row[3],
+            }
+
+    async def store_feedback_weights(self, data: dict) -> None:
+        """Persiste les poids FeedbackLoop (upsert sur id='current')."""
+        import json
+        from datetime import UTC, datetime
+
+        engine = await self._get_engine()
+        async with engine.begin() as conn:
+            now = datetime.now(UTC).isoformat()
+            await conn.execute(
+                text("""
+                    INSERT INTO feedback_weights (id, weights, bias, n_updates, updated_at)
+                    VALUES ('current', :w, :b, :n, :ts)
+                    ON CONFLICT(id) DO UPDATE SET
+                        weights=excluded.weights, bias=excluded.bias,
+                        n_updates=excluded.n_updates, updated_at=excluded.updated_at
+                """),
+                {
+                    "w": json.dumps(data.get("weights", {})),
+                    "b": float(data.get("bias", -4.0)),
+                    "n": int(data.get("n_updates", 0)),
+                    "ts": now,
+                },
+            )
+
+    async def get_feedback_weights(self) -> dict | None:
+        """Retourne les poids FeedbackLoop persistés, ou None si absents."""
+        import json
+
+        engine = await self._get_engine()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text("SELECT weights, bias, n_updates FROM feedback_weights WHERE id='current'")
+            )
+            row = result.fetchone()
+            if row is None:
+                return None
+            try:
+                weights = json.loads(row[0]) if row[0] else {}
+            except Exception:
+                return None
+            return {"weights": weights, "bias": row[1], "n_updates": row[2]}
+
+    async def get_oracle_training_data(
+        self, only_validated: bool = True
+    ) -> list[dict[str, Any]]:
+        """Retourne les échantillons oracle, avec désérialisation des embeddings."""
+        import json
+
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            stmt = select(TrainingSampleOracleRecord)
+            if only_validated:
+                stmt = stmt.where(TrainingSampleOracleRecord.human_validated == True)
+            result = await session.exec(stmt)
+            records = result.all()
+
+        return [
+            {
+                "id": r.id,
+                "diff_embedding": json.loads(r.diff_embedding) if r.diff_embedding else [],
+                "mutation_type": r.mutation_type,
+                "verdict": r.verdict,
+                "human_validated": bool(r.human_validated),
+                "session_id": r.session_id,
+                "created_at": r.created_at,
+            }
+            for r in records
+        ]
+
+    async def get_vuln_training_data(
+        self, only_validated: bool = True
+    ) -> list[dict[str, Any]]:
+        """Retourne les échantillons vuln, avec désérialisation des embeddings."""
+        import json
+
+        # Pour l'instant, training_samples_vuln ne contient pas de flag human_validated.
+        # only_validated est ignoré — prévu pour Sprint 2 quand l'interface UI sera disponible.
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            result = await session.exec(select(TrainingSampleVulnRecord))
+            records = result.all()
+
+        return [
+            {
+                "id": r.id,
+                "endpoint_embedding": json.loads(r.endpoint_embedding) if r.endpoint_embedding else [],
+                "vuln_labels": json.loads(r.vuln_labels) if r.vuln_labels else {},
+                "session_id": r.session_id,
+                "created_at": r.created_at,
+            }
+            for r in records
+        ]
+
+    async def store_oracle_samples_from_session(
+        self,
+        session_id: str,
+        oracle_results: dict[str, list[Any]],
+        findings: list[Any],
+        embedder: Any,
+    ) -> int:
+        """
+        Calcule et persiste les DiffEmbeddings depuis les résultats d'une session.
+
+        Pour chaque finding, identifie la baseline (replayed_from=None, mutation_params={})
+        et calcule un embedding pour chaque mutation (replayed_from=None, mutation_params!={}).
+
+        Retourne le nombre de samples stockés.
+        """
+        count = 0
+        for finding in findings:
+            hyp_id = finding.hypothesis_id
+            results = oracle_results.get(hyp_id, [])
+            if not results:
+                continue
+
+            # Baseline : identifiée par le flag is_baseline (ExperimentEngine le pose au moment
+            # de la création). Fallback sur results[0] pour les enregistrements antérieurs.
+            baseline = next(
+                (r for r in results if getattr(r, "is_baseline", False)),
+                results[0],
+            )
+
+            # Mutations : tous les résultats non-replay et non-baseline
+            mutations = [
+                r for r in results
+                if not getattr(r, "is_baseline", False) and r.replayed_from is None
+            ]
+
+            verdict = finding.status  # "CONFIRMED" | "REFUTED"
+            mutation_type = baseline.experiment_spec.mutation_type
+
+            for mut in mutations:
+                try:
+                    emb = embedder.embed(
+                        baseline.response_received,
+                        mut.response_received,
+                    )
+                    await self.store_oracle_sample(
+                        diff_embedding=emb,
+                        mutation_type=mutation_type,
+                        verdict=verdict,
+                        session_id=session_id,
+                    )
+                    count += 1
+                except Exception as exc:
+                    log.warning(
+                        "kb.store_oracle_sample_failed",
+                        hypothesis_id=hyp_id,
+                        error=str(exc),
+                    )
+
+        return count
+
+    async def count_oracle_training_data(self, only_validated: bool = False) -> int:
+        """Retourne le nombre de samples oracle via SELECT COUNT(*) scalaire."""
+        from sqlalchemy import func as _func
+        from sqlalchemy import select as _sql_select
+        engine = await self._get_engine()
+        async with engine.connect() as conn:
+            stmt = _sql_select(_func.count()).select_from(TrainingSampleOracleRecord)
+            if only_validated:
+                stmt = stmt.where(TrainingSampleOracleRecord.human_validated == True)
+            result = await conn.execute(stmt)
+            return result.scalar() or 0
+
+    async def count_vuln_training_data(self) -> int:
+        """Retourne le nombre de samples vuln via SELECT COUNT(*) scalaire."""
+        from sqlalchemy import func as _func
+        from sqlalchemy import select as _sql_select
+        engine = await self._get_engine()
+        async with engine.connect() as conn:
+            stmt = _sql_select(_func.count()).select_from(TrainingSampleVulnRecord)
+            result = await conn.execute(stmt)
+            return result.scalar() or 0
+
+    async def get_payload_optimizer_stats(self) -> list[dict[str, Any]]:
+        """Retourne les stats des bras du PayloadOptimizer pour la session courante."""
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            result = await session.exec(select(PayloadOptimizerStatRecord))
+            records = result.all()
+        return [
+            {
+                "fingerprint": r.fingerprint,
+                "mutation_type": r.mutation_type,
+                "alpha": r.alpha,
+                "beta": r.beta,
+                "pulls": r.pulls,
+            }
+            for r in records
+        ]
+
+    async def save_payload_optimizer_stats(self, stats: list[dict[str, Any]]) -> None:
+        """Upsert les stats des bras du PayloadOptimizer dans la KB."""
+        if not stats:
+            return
+        engine = await self._get_engine()
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            for s in stats:
+                fp = s.get("fingerprint", "")
+                mt = s.get("mutation_type", "")
+                if not fp or not mt:
+                    continue
+                existing = await session.get(PayloadOptimizerStatRecord, (fp, mt))
+                if existing:
+                    existing.alpha = float(s.get("alpha", existing.alpha))
+                    existing.beta = float(s.get("beta", existing.beta))
+                    existing.pulls = int(s.get("pulls", existing.pulls))
+                    session.add(existing)
+                else:
+                    session.add(PayloadOptimizerStatRecord(
+                        fingerprint=fp,
+                        mutation_type=mt,
+                        alpha=float(s.get("alpha", 1.0)),
+                        beta=float(s.get("beta", 1.0)),
+                        pulls=int(s.get("pulls", 0)),
+                    ))
+            await session.commit()
+        log.info("kb.payload_optimizer_stats_saved", count=len(stats))
+
+    async def train_vuln_model(
+        self,
+        model: Any,
+    ) -> Any:
+        """
+        Entraîne le VulnClassifier sur les données accumulées.
+
+        Args:
+            model: instance VulnClassifier
+
+        Retourne un VulnTrainingResult (ou None si pas assez de données).
+        """
+        samples = await self.get_vuln_training_data(only_validated=False)
+        if not samples:
+            log.info("kb.train_vuln_model.no_samples")
+            return None
+        result = model.train(samples)
+        if result.trained:
+            model.save()
+            log.info(
+                "kb.vuln_model_trained",
+                n_samples=result.n_samples,
+                vuln_types=result.vuln_types_trained,
+            )
+        else:
+            log.info("kb.train_vuln_model.skipped", reason=result.error)
+        return result
+
+    async def train_oracle_model(
+        self,
+        model: Any,
+        only_validated: bool = False,
+    ) -> Any:
+        """
+        Entraîne l'OracleModel sur les données accumulées.
+
+        Args:
+            model: instance OracleModel
+            only_validated: si True, utilise uniquement les samples human_validated
+
+        Retourne un TrainingResult (ou None si pas assez de données).
+        """
+        samples = await self.get_oracle_training_data(only_validated=only_validated)
+        if not samples:
+            log.info("kb.train_oracle_model.no_samples")
+            return None
+        result = model.train(samples)
+        if result.trained:
+            model.save()
+            log.info(
+                "kb.oracle_model_trained",
+                n_samples=result.n_samples,
+                val_accuracy=round(result.val_accuracy, 3),
+            )
+        else:
+            log.info("kb.train_oracle_model.skipped", reason=result.error)
+        return result
+
+
+    async def store_feedback_weights_for_target(
+        self, target_hash: str, target_type: str, data: dict
+    ) -> None:
+        """Persiste les poids FeedbackLoop d'un target spécifique (upsert sur target_hash)."""
+        import json
+
+        engine = await self._get_engine()
+        async with engine.begin() as conn:
+            now = datetime.now(UTC).isoformat()
+            await conn.execute(
+                text("""
+                    INSERT INTO feedback_weights_history
+                        (target_hash, target_type, weights, bias, n_updates, updated_at)
+                    VALUES (:th, :tt, :w, :b, :n, :ts)
+                    ON CONFLICT(target_hash) DO UPDATE SET
+                        target_type=excluded.target_type,
+                        weights=excluded.weights,
+                        bias=excluded.bias,
+                        n_updates=excluded.n_updates,
+                        updated_at=excluded.updated_at
+                """),
+                {
+                    "th": target_hash,
+                    "tt": target_type,
+                    "w": json.dumps(data.get("weights", {})),
+                    "b": float(data.get("bias", -4.0)),
+                    "n": int(data.get("n_updates", 0)),
+                    "ts": now,
+                },
+            )
+
+    async def get_feedback_weights_for_target(self, target_hash: str) -> dict | None:
+        """Retourne les poids FeedbackLoop persistés pour un target donné, ou None."""
+        import json
+
+        engine = await self._get_engine()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    "SELECT weights, bias, n_updates, target_type "
+                    "FROM feedback_weights_history WHERE target_hash=:th"
+                ),
+                {"th": target_hash},
+            )
+            row = result.fetchone()
+            if row is None:
+                return None
+            try:
+                weights = json.loads(row[0]) if row[0] else {}
+            except Exception:
+                return None
+            return {
+                "weights": weights,
+                "bias": row[1],
+                "n_updates": row[2],
+                "target_type": row[3],
+                "target_hash": target_hash,
+            }
+
+    async def list_feedback_weights_snapshots(self) -> list[dict]:
+        """Retourne tous les snapshots de poids FeedbackLoop par target."""
+        import json
+
+        engine = await self._get_engine()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    "SELECT target_hash, target_type, weights, bias, n_updates "
+                    "FROM feedback_weights_history ORDER BY n_updates DESC"
+                )
+            )
+            rows = result.fetchall()
+        snapshots = []
+        for row in rows:
+            try:
+                weights = json.loads(row[2]) if row[2] else {}
+            except Exception:
+                continue
+            snapshots.append({
+                "target_hash": row[0],
+                "target_type": row[1],
+                "weights": weights,
+                "bias": row[3],
+                "n_updates": row[4],
+            })
+        return snapshots
 
 
 def _hash_url(url: str) -> str:
