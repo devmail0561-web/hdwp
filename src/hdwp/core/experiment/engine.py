@@ -77,6 +77,10 @@ class ExperimentEngine:
         self._mutator = MutationModule()
         self._temporal = TemporalModule()
         self._results_buffer: dict[str, list[ExperimentResult]] = {}
+        # Cache des baselines invalides (url, method, role) → True.
+        # Partagé entre toutes les hypothèses : évite de retenter un endpoint
+        # qui a déjà retourné 404/500/0 pour la même combinaison (url, method, role).
+        self._invalid_baselines: set[tuple[str, str, str]] = set()
         # Semaphore: limite les expériences concurrentes pour ne pas flood la cible
         self._semaphore = asyncio.Semaphore(max_concurrent)
     async def run_pending(self, hypotheses: list[Hypothesis]) -> None:
@@ -148,6 +152,16 @@ class ExperimentEngine:
             )
 
             # ── baseline (legitimate access) ──────────────────────────
+            _baseline_key = (plan.baseline_request.url, plan.baseline_request.method, plan.baseline_role)
+            if _baseline_key in self._invalid_baselines:
+                log.debug(
+                    "experiment.baseline_cached_invalid",
+                    hypothesis_id=hyp.id,
+                    url=plan.baseline_request.url,
+                    role=plan.baseline_role,
+                )
+                continue
+
             baseline = await self._execute(
                 plan.baseline_request, hyp.id, plan.experiment_spec,
                 role=plan.baseline_role,
@@ -165,6 +179,7 @@ class ExperimentEngine:
                     url=plan.baseline_request.url,
                     status=base_status,
                 )
+                self._invalid_baselines.add(_baseline_key)
                 self._results_buffer[hyp.id].append(baseline)
                 await self._bus.emit(EXPERIMENT_RESULT, baseline.model_dump(), source="experiment_engine")
                 continue
@@ -175,6 +190,7 @@ class ExperimentEngine:
                     url=plan.baseline_request.url,
                     status=base_status,
                 )
+                self._invalid_baselines.add(_baseline_key)
                 continue
             if baseline_id is None:
                 baseline_id = baseline.id
