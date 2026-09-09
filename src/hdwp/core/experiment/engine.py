@@ -308,7 +308,7 @@ class ExperimentEngine:
                 and model is not None
             ):
                 waf_tags = [t for t in model.tech_stack if t.startswith("waf:")]
-                if waf_tags:
+                if waf_tags and "payload" in plan.experiment_spec.mutation_params:
                     try:
                         from hdwp.core.payloads.waf_bypass.bypass_registry import get_bypass_registry
                         from hdwp.core.model.schemas import ExperimentSpec

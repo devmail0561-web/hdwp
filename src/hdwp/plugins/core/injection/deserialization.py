@@ -111,7 +111,12 @@ def register_deserialization_mutations() -> None:
         from hdwp.core.oracle.violation_oracle import ViolationAssessment, ConfidenceLevel
 
         body = experiment.response_received.body
-        body_bytes = body.encode() if isinstance(body, str) else body
+        if body is None:
+            body_bytes = b""
+        elif isinstance(body, str):
+            body_bytes = body.encode()
+        else:
+            body_bytes = body
 
         # Détecter magic bytes dans réponse
         for lang, magic in MAGIC_BYTES.items():

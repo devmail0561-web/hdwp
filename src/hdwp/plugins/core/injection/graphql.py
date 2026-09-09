@@ -139,17 +139,17 @@ def register_graphql_mutations() -> None:
         """Assess GraphQL introspection par parsing schema keywords."""
         from hdwp.core.oracle.violation_oracle import ViolationAssessment, ConfidenceLevel
 
-        body = experiment.response_received.body
+        body = experiment.response_received.body or ""
 
-        # Compter keywords schema dans réponse
-        schema_count = sum(1 for kw in SCHEMA_KEYWORDS if kw in body)
+        # Compter keywords schema dans réponse — calculé une seule fois
+        found = [kw for kw in SCHEMA_KEYWORDS if kw in body]
 
-        if schema_count >= 3:
+        if len(found) >= 3:
             return ViolationAssessment(
                 violated=True,
                 confidence=ConfidenceLevel.HIGH,
-                verdict=f"GraphQL introspection enabled: {schema_count} schema keywords found",
-                evidence=[f"Schema keywords: {', '.join(kw for kw in SCHEMA_KEYWORDS if kw in body)}"],
+                verdict=f"GraphQL introspection enabled: {len(found)} schema keywords found",
+                evidence=[f"Schema keywords: {', '.join(found)}"],
             )
 
         return ViolationAssessment(

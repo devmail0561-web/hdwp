@@ -192,7 +192,8 @@ def register_ssti_mutations() -> None:
             return _assess_field_injection(baseline, experiment, diff)
 
         # Vérifier si expected_result présent dans body
-        if expected in experiment.response_received.body:
+        body = experiment.response_received.body or ""
+        if expected in body:
             return ViolationAssessment(
                 violated=True,
                 confidence=ConfidenceLevel.HIGH,

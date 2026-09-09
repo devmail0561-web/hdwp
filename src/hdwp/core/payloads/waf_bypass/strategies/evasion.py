@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
+from urllib.parse import quote, urlencode, urlparse, urlunparse, parse_qsl
 
 from hdwp.core.model.schemas import NormalizedRequest
 from hdwp.core.payloads.waf_bypass.bypass_registry import BypassResult, BypassStrategy
@@ -119,14 +119,13 @@ def _hpp(request: NormalizedRequest, params: dict[str, Any]) -> BypassResult:
     if target_param is None:
         return BypassResult(request=request)
 
-    # Construire manuellement pour préserver les clés dupliquées
+    # Construire manuellement pour préserver les clés dupliquées — valeurs URL-encodées
     payload_value = request.query_params.get(target_param, safe_value)
     pairs = [(k, v) for k, v in existing if k != target_param]
     pairs = [(target_param, safe_value), (target_param, payload_value)] + pairs
 
-    new_url = request.url
     parsed = urlparse(request.url)
-    new_qs = "&".join(f"{k}={v}" for k, v in pairs)
+    new_qs = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in pairs)
     new_url = urlunparse(parsed._replace(query=new_qs))
 
     return BypassResult(

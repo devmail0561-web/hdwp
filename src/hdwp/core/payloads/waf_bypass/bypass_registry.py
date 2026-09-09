@@ -291,8 +291,10 @@ class BypassRegistry:
     @classmethod
     def reset_for_testing(cls) -> None:
         """Réinitialise le singleton. Miroir de PayloadDatabase.reset_for_testing."""
+        global _global_bypass_registry
         with cls._lock:
             cls._instance = None
+            _global_bypass_registry = None
 
 
 _global_bypass_registry: BypassRegistry | None = None
