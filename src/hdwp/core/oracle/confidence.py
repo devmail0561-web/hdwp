@@ -13,9 +13,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from hdwp.core.model.schemas import ConfidenceScore, ExperimentResult, SemanticDiff, SignalContribution
 from hdwp.core.oracle.violation_oracle import ViolationAssessment, ViolationVerdict
+
+if TYPE_CHECKING:
+    from hdwp.core.context.config_schema import TuningConfig
 
 WEIGHTS = {
     "oracle_strength": 0.25,
@@ -187,6 +191,34 @@ V2_DEFAULT_WEIGHTS = {
 }
 
 V2_DEFAULT_BIAS = -4.0
+
+
+def extract_v2_weights_from_tuning(tuning: "TuningConfig | None") -> tuple[dict[str, float], float]:
+    """Extrait les poids V2 depuis TuningConfig (Phase 0: config externalization).
+
+    Args:
+        tuning: Configuration de tuning (None = utiliser defaults)
+
+    Returns:
+        Tuple (weights_dict, bias) avec les 10 poids + bias
+    """
+    if tuning is None:
+        return V2_DEFAULT_WEIGHTS.copy(), V2_DEFAULT_BIAS
+
+    weights = {
+        "oracle_strength": tuning.v2_weight_oracle_strength,
+        "reproducibility": tuning.v2_weight_reproducibility,
+        "observation_quality": tuning.v2_weight_observation_quality,
+        "behavioral_specificity": tuning.v2_weight_behavioral_specificity,
+        "experiment_coverage": tuning.v2_weight_experiment_coverage,
+        "temporal_signal": tuning.v2_weight_temporal_signal,
+        "crossrole_signal": tuning.v2_weight_crossrole_signal,
+        "invariant_violated": tuning.v2_weight_invariant_violated,
+        "waf_bypass_success": tuning.v2_weight_waf_bypass_success,
+        "causal_depth": tuning.v2_weight_causal_depth,
+    }
+    return weights, tuning.v2_bias
+
 
 _DIMENSION_LABELS = {
     "oracle_strength": "Force du verdict oracle",

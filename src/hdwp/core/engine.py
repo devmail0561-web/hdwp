@@ -298,7 +298,7 @@ class HDWPEngine:
         from hdwp.core.knowledge.base import _hash_url as _kb_hash_url
         from hdwp.core.ml.meta_learner import MetaLearner
         _target_hash = _kb_hash_url(context.base_url)
-        ml = await MetaLearner.load(kb, target_hash=_target_hash, target_type=url_target_type)
+        ml = await MetaLearner.load(kb, target_hash=_target_hash, target_type=url_target_type, tuning=tuning)
         log.info("engine.ml_stack_loaded", stats=ml.stats())
 
         oracle = SemanticOracle(

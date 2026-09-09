@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class LLMConfig(BaseModel):
@@ -123,6 +123,23 @@ class TuningConfig(BaseModel):
 
     # Boost de confidence BOLA quand deux rôles distincts obtiennent status=200
     bola_role_confirmation_boost: float = 0.15
+
+    # ── V2 Confidence Model Weights (10 dimensions logistiques) ──────────────────
+    # Permettent de configurer les poids du modèle V2 via YAML
+    # Valeurs par défaut = V2_DEFAULT_WEIGHTS de confidence.py
+    v2_weight_oracle_strength: float = 1.8
+    v2_weight_reproducibility: float = 2.2
+    v2_weight_observation_quality: float = 0.8
+    v2_weight_behavioral_specificity: float = 1.0
+    v2_weight_experiment_coverage: float = 0.7
+    v2_weight_temporal_signal: float = 1.5
+    v2_weight_crossrole_signal: float = 1.8
+    v2_weight_invariant_violated: float = 2.5
+    v2_weight_waf_bypass_success: float = 0.6
+    v2_weight_causal_depth: float = 1.2
+    v2_bias: float = -4.0
+
+    # Note: Validation range [-6, 6] appliquée via FeedbackLoop constraints (ADR-ML-009)
 
 
 class HDWPContextConfig(BaseModel):

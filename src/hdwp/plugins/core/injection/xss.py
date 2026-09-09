@@ -9,6 +9,8 @@ Détection via InjectionOracle.assess_xss() existant.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from hdwp.core.model.schemas import (
     ApplicationModelData,
     ExperimentSpec,
@@ -20,13 +22,16 @@ from hdwp.core.model.schemas import (
 )
 from hdwp.plugins.base import HDWPPlugin
 
+if TYPE_CHECKING:
+    from hdwp.store.payload_database import PayloadDatabase
+
 # Mots-clés indiquant des champs reflétés dans HTML
 XSS_PARAM_KEYWORDS = frozenset({
     "name", "comment", "message", "title", "description", "text",
     "content", "body", "search", "query", "feedback", "review",
 })
 
-# Payloads XSS classiques
+# Payloads XSS legacy — utilisés en fallback si PayloadDatabase indisponible (Phase 0)
 XSS_PAYLOADS = [
     "<script>alert(1)</script>",                             # direct reflection
     "<img src=x onerror=alert(1)>",                         # inline event handler
@@ -41,6 +46,10 @@ XSS_PAYLOADS = [
 
 class XSSPlugin(HDWPPlugin):
     """Détecte les vulnérabilités Cross-Site Scripting."""
+
+    def __init__(self, payload_db: "PayloadDatabase | None" = None):
+        """Phase 0: injection PayloadDatabase pour externalisation payloads."""
+        self._payload_db = payload_db
 
     @property
     def id(self) -> str:

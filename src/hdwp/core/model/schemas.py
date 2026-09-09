@@ -301,6 +301,10 @@ class Finding(BaseModel):
     proof: dict[str, Any] = Field(default_factory=dict)
     remediation_hint: str = ""
 
+    # Threshold actif lors de la création du finding (Phase 0: config externalization)
+    # Permet de revalider findings avec nouveaux thresholds sans incohérence
+    confirmed_threshold_used: float = 0.85
+
 
 # ── Flow Map schemas ─────────────────────────────────────────────────────────
 

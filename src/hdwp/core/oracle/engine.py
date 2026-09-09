@@ -50,6 +50,7 @@ from hdwp.core.oracle.confidence import (
     compute_behavioral_specificity,
     compute_confidence,
     compute_observation_quality,
+    extract_v2_weights_from_tuning,
 )
 from hdwp.core.oracle.semantic_diff import compute_semantic_diff
 from hdwp.core.oracle.violation_oracle import (
@@ -92,7 +93,9 @@ class SemanticOracle:
         self.invariant_store: Any = None  # injecté par l'engine après création
 
         # V4 — ConfidenceModelV2 (10D logistic) et collecte des signaux V3
-        self._confidence_v2 = ConfidenceModelV2()
+        # Phase 0: lire V2 weights depuis TuningConfig si fourni
+        v2_weights, v2_bias = extract_v2_weights_from_tuning(tuning)
+        self._confidence_v2 = ConfidenceModelV2(weights=v2_weights, bias=v2_bias)
         self._temporal_signals: dict[str, float] = {}    # hyp_id → signal [0,1]
         self._crossrole_signals: dict[str, float] = {}   # normalized path → signal [0,1]
         self._invariant_signals: dict[str, float] = {}   # normalized path → 0.0|1.0

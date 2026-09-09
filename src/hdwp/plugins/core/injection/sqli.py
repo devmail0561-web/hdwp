@@ -147,6 +147,10 @@ def _sqli_chain(param_name: str, param_loc: str, ep_path: str) -> list[Experimen
 class SQLiPlugin(HDWPPlugin):
     """Détecte les vulnérabilités d'injection SQL."""
 
+    def __init__(self, payload_db: "PayloadDatabase | None" = None):
+        """Phase 0: injection PayloadDatabase (full integration Phase 1)."""
+        self._payload_db = payload_db
+
     @property
     def id(self) -> str:
         return "core.injection.sqli"

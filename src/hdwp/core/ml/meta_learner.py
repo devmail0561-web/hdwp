@@ -138,6 +138,7 @@ class MetaLearner:
         kb: KnowledgeBase,
         target_hash: str,
         target_type: str,
+        tuning: "TuningConfig | None" = None,  # Phase 0: config externalization
     ) -> MetaLearner:
         """
         Initialise et charge tous les composants ML depuis la KB.
@@ -151,7 +152,7 @@ class MetaLearner:
         await self._load_payload_optimizer(kb)
         await self._load_active_learner()
         await self._load_similarity_index(kb)
-        await self._load_feedback_loop(kb, target_hash, target_type)
+        await self._load_feedback_loop(kb, target_hash, target_type, tuning=tuning)
         await self._load_endpoint_clusterer(kb)
         return self
 
@@ -208,12 +209,12 @@ class MetaLearner:
             pass
 
     async def _load_feedback_loop(
-        self, kb: KnowledgeBase, target_hash: str, target_type: str
+        self, kb: KnowledgeBase, target_hash: str, target_type: str, tuning: "TuningConfig | None" = None
     ) -> None:
         try:
             from hdwp.core.ml.models.feedback_loop import FeedbackLoop
 
-            fl = FeedbackLoop()
+            fl = FeedbackLoop(tuning=tuning)  # Phase 0: init depuis TuningConfig
             # Priorité 1 : poids persistés pour ce target exact
             fb_data = await kb.get_feedback_weights_for_target(target_hash)
             if fb_data is None:

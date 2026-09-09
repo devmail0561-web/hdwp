@@ -9,6 +9,8 @@ Détection via InjectionOracle.assess_cmdi() existant.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from hdwp.core.model.schemas import (
     ApplicationModelData,
     ExperimentSpec,
@@ -20,11 +22,15 @@ from hdwp.core.model.schemas import (
 )
 from hdwp.plugins.base import HDWPPlugin
 
+if TYPE_CHECKING:
+    from hdwp.store.payload_database import PayloadDatabase
+
 CMDI_PARAM_KEYWORDS = frozenset({
     "cmd", "exec", "command", "run", "ping", "host", "ip",
     "query", "shell", "execute", "process", "system",
 })
 
+# Payloads legacy — utilisés en fallback si PayloadDatabase indisponible (Phase 0)
 CMDI_PAYLOADS = [
     "; id",
     "| id",
@@ -38,6 +44,10 @@ CMDI_PAYLOADS = [
 
 class CMDiPlugin(HDWPPlugin):
     """Détecte les vulnérabilités d'injection de commandes OS."""
+
+    def __init__(self, payload_db: "PayloadDatabase | None" = None):
+        """Phase 0: injection PayloadDatabase pour externalisation payloads."""
+        self._payload_db = payload_db
 
     @property
     def id(self) -> str:
@@ -89,6 +99,16 @@ class CMDiPlugin(HDWPPlugin):
             and p.type_inferred in ("string",)
         ][:5]
 
+        # Phase 0: charger payloads depuis PayloadDatabase avec fallback legacy
+        payloads_str = []
+        if self._payload_db:
+            payload_variants = self._payload_db.get_payloads(self.id, tech_stack=model.tech_stack)
+            payloads_str = [v.value for v in payload_variants if isinstance(v.value, str)]
+
+        # Fallback si PayloadDatabase vide ou non fourni
+        if not payloads_str:
+            payloads_str = CMDI_PAYLOADS
+
         hypotheses = []
         for param in candidates:
             experiments = [
@@ -103,7 +123,7 @@ class CMDiPlugin(HDWPPlugin):
                     },
                     description=f"CMDi test: {param.name}={payload}",
                 )
-                for payload in CMDI_PAYLOADS
+                for payload in payloads_str
             ]
             hypotheses.append(
                 Hypothesis(

