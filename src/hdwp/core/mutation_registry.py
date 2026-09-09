@@ -345,6 +345,97 @@ def _register_builtins() -> None:
             "cwe_id": "CWE-915",
             "remediation": "Filtrer et whitelist les paramètres acceptés, rejeter les champs inconnus.",
         },
+        # Phase 3 — 14 nouveaux types de mutation
+        {
+            "name": "xxe_injection",
+            "owasp_category": "A05:2021",
+            "cwe_id": "CWE-611",
+            "remediation": "Désactiver les entités XML externes (FEATURE_SECURE_PROCESSING). Utiliser des parseurs sans DTD.",
+        },
+        {
+            "name": "crlf_injection",
+            "owasp_category": "A03:2021",
+            "cwe_id": "CWE-113",
+            "remediation": "Valider et encoder les entrées utilisateur avant de les intégrer dans les headers HTTP.",
+        },
+        {
+            "name": "ldap_injection",
+            "owasp_category": "A03:2021",
+            "cwe_id": "CWE-90",
+            "remediation": "Utiliser des requêtes LDAP paramétrées. Échapper les caractères spéciaux LDAP.",
+        },
+        {
+            "name": "xpath_injection",
+            "owasp_category": "A03:2021",
+            "cwe_id": "CWE-643",
+            "remediation": "Utiliser des requêtes XPath paramétrées. Valider et encoder les entrées.",
+        },
+        {
+            "name": "el_injection",
+            "owasp_category": "A03:2021",
+            "cwe_id": "CWE-917",
+            "remediation": "Désactiver l'évaluation d'expressions EL sur les entrées utilisateur. Utiliser des templates statiques.",
+        },
+        {
+            "name": "prototype_pollution",
+            "owasp_category": "A08:2021",
+            "cwe_id": "CWE-1321",
+            "remediation": "Valider les clés JSON. Rejeter __proto__, constructor, prototype dans les paramètres.",
+        },
+        {
+            "name": "csrf_test",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-352",
+            "remediation": "Implémenter des tokens CSRF synchronisés. Vérifier l'header Origin/Referer.",
+        },
+        {
+            "name": "cache_poisoning",
+            "owasp_category": "A05:2021",
+            "cwe_id": "CWE-345",
+            "remediation": "Valider et normaliser les headers de cache. Ne pas inclure les headers non fiables dans la clé de cache.",
+        },
+        {
+            "name": "http_smuggling",
+            "owasp_category": "A05:2021",
+            "cwe_id": "CWE-444",
+            "remediation": "Normaliser les requêtes ambiguës au niveau du front-end. Rejeter les requêtes avec CL et TE simultanés.",
+        },
+        {
+            "name": "file_upload",
+            "owasp_category": "A08:2021",
+            "cwe_id": "CWE-434",
+            "remediation": "Valider le type MIME côté serveur. Stocker les uploads hors du webroot. Scanner avec antivirus.",
+        },
+        {
+            "name": "hpp",
+            "owasp_category": "A01:2021",
+            "cwe_id": "CWE-235",
+            "remediation": "Définir un comportement explicite pour les paramètres dupliqués. Rejeter ou utiliser la première occurrence uniquement.",
+        },
+        {
+            "name": "info_disclosure",
+            "owasp_category": "A05:2021",
+            "cwe_id": "CWE-497",
+            "remediation": "Désactiver les messages d'erreur verbeux en production. Implémenter des pages d'erreur génériques.",
+        },
+        {
+            "name": "django_debug",
+            "owasp_category": "A05:2021",
+            "cwe_id": "CWE-215",
+            "remediation": "Désactiver DEBUG=False en production. Ne jamais déployer avec les settings de développement.",
+        },
+        {
+            "name": "spring_actuator",
+            "owasp_category": "A05:2021",
+            "cwe_id": "CWE-16",
+            "remediation": "Sécuriser les endpoints Actuator avec Spring Security. Exposer uniquement /health en production.",
+        },
+        {
+            "name": "laravel_mass_assign",
+            "owasp_category": "A04:2021",
+            "cwe_id": "CWE-915",
+            "remediation": "Utiliser $guarded ou $fillable Eloquent explicitement. Ne jamais passer $request->all() à create().",
+        },
     ]
     for meta in _metadata:
         try:

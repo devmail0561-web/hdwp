@@ -82,7 +82,7 @@ class LaravelMassAssignPlugin(HDWPPlugin):
                     priority="HIGH",
                     priority_rationale="Laravel Eloquent mass assignment sur champ protégé",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="laravel_mass_assign",
                         base_request=NormalizedRequest(method=method, url=ep.path),
                         mutation_params={
                             "parameter_name": field,

@@ -99,7 +99,7 @@ class XPathInjectionPlugin(HDWPPlugin):
                     priority="MEDIUM",
                     priority_rationale="XPath injection = bypass auth sur apps XML, extraction données",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="xpath_injection",
                         base_request=NormalizedRequest(method="GET", url=""),
                         mutation_params={
                             "parameter_name": param.name,

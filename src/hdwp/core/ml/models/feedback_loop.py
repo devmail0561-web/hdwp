@@ -70,8 +70,8 @@ from hdwp.core.oracle.confidence import (
     extract_v2_weights_from_tuning,
 )
 
-# Aliases courts utilisés par les tests
-DEFAULT_WEIGHTS = V2_DEFAULT_WEIGHTS
+# Aliases courts utilisés par les tests — copies pour éviter la mutation du canonique
+DEFAULT_WEIGHTS = dict(V2_DEFAULT_WEIGHTS)
 DEFAULT_BIAS = V2_DEFAULT_BIAS
 
 

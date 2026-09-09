@@ -81,7 +81,7 @@ class SpringActuatorPlugin(HDWPPlugin):
                 priority="HIGH",
                 priority_rationale="Actuator exposé → fuite de config, env vars, heap dump",
                 required_experiments=[ExperimentSpec(
-                    mutation_type="privilege_escalation",
+                    mutation_type="spring_actuator",
                     base_request=NormalizedRequest(method="GET", url=full_path),
                     mutation_params={
                         "endpoint_path": full_path,

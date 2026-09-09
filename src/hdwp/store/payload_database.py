@@ -83,6 +83,13 @@ class PayloadDatabase:
                 cls._instance._initialized = False
             return cls._instance
 
+    @classmethod
+    def reset_for_testing(cls) -> None:
+        global _global_payload_db
+        with cls._lock:
+            cls._instance = None
+            _global_payload_db = None
+
     def __init__(self):
         if self._initialized:
             return

@@ -93,7 +93,7 @@ class LDAPInjectionPlugin(HDWPPlugin):
                     priority="HIGH",
                     priority_rationale="LDAP injection = bypass auth, énumération annuaire",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="ldap_injection",
                         base_request=NormalizedRequest(method="GET", url=""),
                         mutation_params={
                             "parameter_name": param.name,

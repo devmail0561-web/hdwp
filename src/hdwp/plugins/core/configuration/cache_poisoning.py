@@ -77,7 +77,7 @@ class CachePoisoningPlugin(HDWPPlugin):
                         "à tous les utilisateurs"
                     ),
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="cache_poisoning",
                         base_request=NormalizedRequest(method="GET", url=""),
                         mutation_params={
                             "parameter_name": header_name,

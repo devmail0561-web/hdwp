@@ -93,7 +93,7 @@ class FileUploadPlugin(HDWPPlugin):
                     priority="HIGH",
                     priority_rationale="Upload non restreint = RCE via webshell",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="file_upload",
                         base_request=NormalizedRequest(method="POST", url=""),
                         mutation_params={
                             "parameter_name": param.name,

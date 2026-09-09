@@ -64,7 +64,7 @@ class HTTPSmugglingPlugin(HDWPPlugin):
                     "empoisonnement de cache, vol de sessions"
                 ),
                 required_experiments=[ExperimentSpec(
-                    mutation_type="field_injection",
+                    mutation_type="http_smuggling",
                     base_request=NormalizedRequest(method="POST", url=""),
                     mutation_params={
                         "endpoint_path": ep.path,
@@ -83,7 +83,7 @@ class HTTPSmugglingPlugin(HDWPPlugin):
                 priority="HIGH",
                 priority_rationale="HTTP Smuggling = bypass de contrôles de sécurité",
                 required_experiments=[ExperimentSpec(
-                    mutation_type="field_injection",
+                    mutation_type="http_smuggling",
                     base_request=NormalizedRequest(method="POST", url=""),
                     mutation_params={
                         "endpoint_path": ep.path,

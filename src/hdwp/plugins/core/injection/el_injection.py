@@ -99,7 +99,7 @@ class ELInjectionPlugin(HDWPPlugin):
                     priority="HIGH",
                     priority_rationale="EL injection = RCE dans les frameworks Java (Spring, Struts, Thymeleaf)",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="el_injection",
                         base_request=NormalizedRequest(method="GET", url=""),
                         mutation_params={
                             "parameter_name": param.name,

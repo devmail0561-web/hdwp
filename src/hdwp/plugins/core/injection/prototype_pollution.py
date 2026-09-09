@@ -99,7 +99,7 @@ class PrototypePollutionPlugin(HDWPPlugin):
                     priority="HIGH",
                     priority_rationale="Prototype pollution = bypass auth, RCE dans Node.js/Express",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="prototype_pollution",
                         base_request=NormalizedRequest(method="POST", url=""),
                         mutation_params={
                             "parameter_name": param.name,

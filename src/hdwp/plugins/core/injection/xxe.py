@@ -89,7 +89,7 @@ class XXEPlugin(HDWPPlugin):
                     priority="HIGH",
                     priority_rationale="XXE = lecture fichiers arbitraires + SSRF interne",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="xxe_injection",
                         base_request=NormalizedRequest(method=method, url=""),
                         mutation_params={
                             "parameter_name": "body",

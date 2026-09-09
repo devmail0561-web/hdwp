@@ -73,7 +73,7 @@ class DjangoDebugPlugin(HDWPPlugin):
                 priority="MEDIUM",
                 priority_rationale="Django DEBUG=True peut exposer settings, env vars, stack traces",
                 required_experiments=[ExperimentSpec(
-                    mutation_type="field_injection",
+                    mutation_type="django_debug",
                     base_request=NormalizedRequest(method="GET", url=ep.path),
                     mutation_params={
                         "parameter_name": "__debug__",

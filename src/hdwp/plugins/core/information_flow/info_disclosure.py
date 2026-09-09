@@ -90,7 +90,7 @@ class InfoDisclosurePlugin(HDWPPlugin):
                     priority="MEDIUM",
                     priority_rationale="Information disclosure via messages d'erreur détaillés",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="info_disclosure",
                         base_request=NormalizedRequest(method=method, url=""),
                         mutation_params={
                             "parameter_name": param_name,

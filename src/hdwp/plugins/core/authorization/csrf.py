@@ -81,7 +81,7 @@ class CSRFPlugin(HDWPPlugin):
                 priority="MEDIUM",
                 priority_rationale="CSRF = actions non-autorisées via navigateur authentifié",
                 required_experiments=[ExperimentSpec(
-                    mutation_type="field_injection",
+                    mutation_type="csrf_test",
                     base_request=NormalizedRequest(method=method, url=""),
                     mutation_params={
                         "endpoint_path": ep.path,

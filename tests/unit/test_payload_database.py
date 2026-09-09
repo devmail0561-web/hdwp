@@ -20,9 +20,9 @@ from hdwp.store.payload_database import PayloadDatabase, PayloadVariant
 @pytest.fixture(autouse=True)
 def reset_singleton():
     """Réinitialise le singleton PayloadDatabase entre chaque test."""
-    PayloadDatabase._instance = None
+    PayloadDatabase.reset_for_testing()
     yield
-    PayloadDatabase._instance = None
+    PayloadDatabase.reset_for_testing()
 
 
 class TestPayloadDatabaseYAMLLoading:

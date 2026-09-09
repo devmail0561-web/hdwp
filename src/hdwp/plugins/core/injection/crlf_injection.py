@@ -73,7 +73,7 @@ class CRLFPlugin(HDWPPlugin):
                     priority="MEDIUM",
                     priority_rationale="CRLF injection permet cookie injection, session fixation, cache poisoning",
                     required_experiments=[ExperimentSpec(
-                        mutation_type="field_injection",
+                        mutation_type="crlf_injection",
                         base_request=NormalizedRequest(method="GET", url=""),
                         mutation_params={
                             "parameter_name": param.name,
