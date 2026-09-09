@@ -436,6 +436,36 @@ class MutationModule:
         from hdwp.core import mutation_registry
 
         result = mutation_registry.apply(plan.mutation_type, plan, session_manager)
-        if result is not None:
-            return result
-        return plan.baseline_request
+        if result is None:
+            result = plan.baseline_request
+
+        # Phase 2: Apply transport-level WAF bypass if specified in mutation_params.
+        # Only activates when _transport_bypass key is present — zero regression for existing mutations.
+        transport_bypass: str | None = (
+            plan.experiment_spec.mutation_params.get("_transport_bypass")
+            if plan.experiment_spec
+            else None
+        )
+        if transport_bypass:
+            try:
+                from hdwp.core.payloads.waf_bypass.bypass_registry import get_bypass_registry
+                bypass_result = get_bypass_registry().apply_bypass(
+                    transport_bypass,
+                    result,
+                    dict(plan.experiment_spec.mutation_params),
+                )
+                if bypass_result.raw_override is not None:
+                    result = bypass_result.request.model_copy(
+                        update={"raw_body_override": bypass_result.raw_override}
+                    )
+                else:
+                    result = bypass_result.request
+            except Exception as exc:
+                import structlog as _structlog
+                _structlog.get_logger().debug(
+                    "mutation.transport_bypass_failed",
+                    bypass=transport_bypass,
+                    error=str(exc),
+                )
+
+        return result

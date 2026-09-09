@@ -22,6 +22,9 @@ class NormalizedRequest(BaseModel):
     body: Any | None = None
     query_params: dict[str, str] = Field(default_factory=dict)
     path_params: dict[str, str] = Field(default_factory=dict)
+    # Phase 2: raw bytes body override for smuggling/chunked strategies.
+    # When set, engine._send() uses content=raw_body_override instead of normal body encoding.
+    raw_body_override: bytes | None = None
 
 
 class NormalizedResponse(BaseModel):

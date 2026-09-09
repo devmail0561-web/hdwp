@@ -296,6 +296,53 @@ class ExperimentEngine:
                     except Exception as exc:
                         log.debug("experiment.waf_bypass_failed", error=str(exc))
 
+            # ── Transport-level WAF bypass (Phase 2) ──────────────────
+            # Déclenché sur les mêmes 403/406 que le bypass d'encodage,
+            # génère des specs avec _transport_bypass dans mutation_params.
+            # depth 0 → evasion seulement (non intrusif)
+            # depth 1 → toutes catégories si evasion a échoué
+            if (
+                depth < self._MAX_FOLLOWUP_DEPTH
+                and mutation.response_received is not None
+                and mutation.response_received.status_code in (403, 406)
+                and model is not None
+            ):
+                waf_tags = [t for t in model.tech_stack if t.startswith("waf:")]
+                if waf_tags:
+                    try:
+                        from hdwp.core.payloads.waf_bypass.bypass_registry import get_bypass_registry
+                        from hdwp.core.model.schemas import ExperimentSpec
+                        bypass_registry = get_bypass_registry()
+                        cat = "evasion" if depth == 0 else None
+                        strategies = bypass_registry.get_strategies_for_waf(
+                            waf_tags[0], max_count=2, category=cat
+                        )
+                        for strategy in strategies:
+                            transport_spec = ExperimentSpec(
+                                mutation_type=plan.experiment_spec.mutation_type,
+                                base_request=plan.experiment_spec.base_request,
+                                mutation_params={
+                                    **dict(plan.experiment_spec.mutation_params),
+                                    "_transport_bypass": strategy.name,
+                                },
+                                description=(
+                                    f"Transport bypass [{strategy.name}] for {waf_tags[0]}"
+                                ),
+                            )
+                            transport_plans = self._selector.select_for_spec(
+                                transport_spec, hyp, model, corpus
+                            )
+                            for tp in transport_plans:
+                                plan_queue.append((tp, depth + 1))
+                        if strategies:
+                            log.debug(
+                                "experiment.transport_bypass_queued",
+                                waf=waf_tags[0],
+                                n_strategies=len(strategies),
+                            )
+                    except Exception as exc:
+                        log.debug("experiment.transport_bypass_error", error=str(exc))
+
             # ── replay (reproducibility) ──────────────────────────────
             replay = await self._execute(
                 mutated_req, hyp.id, plan.experiment_spec,
@@ -429,6 +476,14 @@ async def _send(client: httpx.AsyncClient, req: NormalizedRequest) -> httpx.Resp
     headers: dict[str, Any] = {
         k: v for k, v in req.headers.items() if v != "[REDACTED]"
     }
+    # Phase 2: raw body override for smuggling/chunked strategies
+    if req.raw_body_override is not None:
+        return await client.request(
+            method=req.method,
+            url=req.url,
+            headers=headers,
+            content=req.raw_body_override,
+        )
     if isinstance(req.body, dict):
         return await client.request(
             method=req.method,
