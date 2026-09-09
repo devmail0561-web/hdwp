@@ -219,8 +219,9 @@ class HDWPEngine:
                 if p.id not in disabled_ids:
                     registry.enable(p.id)
 
-        # Stratégies d'exploit : appliquer la config de mission sur le registry singleton
-        from hdwp.core.exploit.strategy_registry import _default_registry as _exploit_registry
+        # Stratégies d'exploit : copie légère par session pour éviter la mutation du singleton partagé
+        from hdwp.core.exploit.strategy_registry import StrategyRegistry as _ExploitRegistry, _default_registry as _builtin_exploit_registry
+        _exploit_registry = _ExploitRegistry._make_session_copy(_builtin_exploit_registry)
         _exploit_registry.apply_mission_config(context.config.exploit_strategies)
 
         # Enregistrer les mutations custom des plugins

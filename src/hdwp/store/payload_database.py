@@ -107,6 +107,9 @@ class PayloadDatabase:
 
         Priorité: user_dir > builtin_dir (les overrides écrasent les built-in)
         """
+        # Idempotence : réinitialiser avant rechargement pour éviter les entrées périmées
+        self._payloads.clear()
+
         if builtin_dir is None:
             # Détecter le répertoire built-in relatif au module
             module_path = Path(__file__).parent.parent
@@ -272,7 +275,8 @@ class PayloadDatabase:
                         self._generate_obfuscated_variants(variant, definition.payload_type, max_variants)
                     )
 
-            return expanded_variants[:max_variants * len(variants)]
+            # +1 par variant source pour inclure la variante originale (non encodée)
+            return expanded_variants[:(max_variants + 1) * len(variants)]
 
         return variants
 

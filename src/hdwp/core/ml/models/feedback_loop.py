@@ -38,6 +38,10 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hdwp.core.context.config_schema import TuningConfig
 
 log = logging.getLogger(__name__)
 
@@ -90,15 +94,17 @@ class FeedbackLoop:
     sauvegardé en fin de session.
     """
 
-    def __init__(self, tuning: "TuningConfig | None" = None) -> None:
+    def __init__(self, tuning: TuningConfig | None = None) -> None:
         # Phase 0.1: initialiser depuis TuningConfig ou V2_DEFAULT_WEIGHTS (single source)
         if tuning is not None:
             initial_weights, initial_bias = extract_v2_weights_from_tuning(tuning)
-            self._weights: dict[str, float] = initial_weights
-            self._bias: float = initial_bias
         else:
-            self._weights: dict[str, float] = dict(V2_DEFAULT_WEIGHTS)
-            self._bias: float = V2_DEFAULT_BIAS
+            initial_weights, initial_bias = dict(V2_DEFAULT_WEIGHTS), V2_DEFAULT_BIAS
+        self._weights: dict[str, float] = initial_weights
+        self._bias: float = initial_bias
+        # Cible du decay : poids initiaux (TuningConfig ou defaults), pas les defaults hardcodés
+        self._decay_target_weights: dict[str, float] = dict(initial_weights)
+        self._decay_target_bias: float = initial_bias
         self._n_updates: int = 0
 
     # ── Online learning ───────────────────────────────────────────────────────
@@ -143,11 +149,11 @@ class FeedbackLoop:
         """
         for dim in V2_DIMENSIONS:
             w = self._weights[dim]
-            default = V2_DEFAULT_WEIGHTS[dim]
-            # Décay vers la valeur par défaut : w = w · decay + default · (1 - decay)
-            self._weights[dim] = round(w * SESSION_DECAY + default * (1.0 - SESSION_DECAY), 6)
+            target = self._decay_target_weights[dim]
+            # Décay vers les poids initiaux (TuningConfig ou defaults) — jamais les hardcoded defaults
+            self._weights[dim] = round(w * SESSION_DECAY + target * (1.0 - SESSION_DECAY), 6)
         self._bias = round(
-            self._bias * SESSION_DECAY + V2_DEFAULT_BIAS * (1.0 - SESSION_DECAY), 6
+            self._bias * SESSION_DECAY + self._decay_target_bias * (1.0 - SESSION_DECAY), 6
         )
         if self._n_updates > 0:
             log.debug(

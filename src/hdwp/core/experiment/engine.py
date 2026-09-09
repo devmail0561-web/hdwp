@@ -257,11 +257,13 @@ class ExperimentEngine:
             # ── WAF bypass adaptatif ──────────────────────────────────
             # Si la mutation retourne un 403 et qu'un WAF est connu, générer des
             # follow-up specs avec encodages adaptés au WAF détecté.
+            # _bypass_attempted empêche la récursion : un plan de bypass ne génère pas d'autres bypasses.
             if (
                 depth < self._MAX_FOLLOWUP_DEPTH
                 and mutation.response_received is not None
                 and mutation.response_received.status_code in (403, 406)
                 and model is not None
+                and not plan.experiment_spec.mutation_params.get("_bypass_attempted")
             ):
                 waf_tags = [t for t in model.tech_stack if t.startswith("waf:")]
                 if waf_tags and "payload" in plan.experiment_spec.mutation_params:
@@ -281,7 +283,7 @@ class ExperimentEngine:
                             bypass_spec = ExperimentSpec(
                                 mutation_type=plan.experiment_spec.mutation_type,
                                 base_request=plan.experiment_spec.base_request,
-                                mutation_params=bypass_params,
+                                mutation_params={**bypass_params, "_bypass_attempted": True},
                                 description=f"WAF bypass ({bypass_params.get('_bypass_strategy')}): {waf_tag}",
                             )
                             bypass_plans = self._selector.select_for_spec(bypass_spec, hyp, model, corpus)
@@ -297,18 +299,19 @@ class ExperimentEngine:
                         log.debug("experiment.waf_bypass_failed", error=str(exc))
 
             # ── Transport-level WAF bypass (Phase 2) ──────────────────
-            # Déclenché sur les mêmes 403/406 que le bypass d'encodage,
-            # génère des specs avec _transport_bypass dans mutation_params.
-            # depth 0 → evasion seulement (non intrusif)
-            # depth 1 → toutes catégories si evasion a échoué
+            # Déclenché sur les mêmes 403/406 que le bypass d'encodage.
+            # Applicable à toutes les mutations (pas seulement payload), d'où l'absence
+            # de guard "payload in mutation_params".
+            # _bypass_attempted empêche la récursion (même flag que le bypass encodage).
             if (
                 depth < self._MAX_FOLLOWUP_DEPTH
                 and mutation.response_received is not None
                 and mutation.response_received.status_code in (403, 406)
                 and model is not None
+                and not plan.experiment_spec.mutation_params.get("_bypass_attempted")
             ):
                 waf_tags = [t for t in model.tech_stack if t.startswith("waf:")]
-                if waf_tags and "payload" in plan.experiment_spec.mutation_params:
+                if waf_tags:
                     try:
                         from hdwp.core.payloads.waf_bypass.bypass_registry import get_bypass_registry
                         from hdwp.core.model.schemas import ExperimentSpec
@@ -324,6 +327,7 @@ class ExperimentEngine:
                                 mutation_params={
                                     **dict(plan.experiment_spec.mutation_params),
                                     "_transport_bypass": strategy.name,
+                                    "_bypass_attempted": True,
                                 },
                                 description=(
                                     f"Transport bypass [{strategy.name}] for {waf_tags[0]}"

@@ -229,23 +229,31 @@ class BypassRegistry:
         for waf_id, sig in self._waf_signatures.items():
             if waf_id == "generic":
                 continue
-            if status_code not in sig.block_status_codes:
-                continue
 
-            # Test headers de présence
+            # Détection de signature : headers/body sur TOUS les statuts (ex. cf-ray présent sur 200)
+            # Le statut est un signal de blocage mais pas une condition de présence du WAF.
+            matched = False
+
             for header_name in sig.headers:
                 if header_name.lower() in headers_lower:
-                    return f"waf:{waf_id}"
+                    matched = True
+                    break
 
-            # Test Server header
-            for pattern in sig.server_patterns:
-                if pattern.lower() in server_value:
-                    return f"waf:{waf_id}"
+            if not matched:
+                for pattern in sig.server_patterns:
+                    if pattern.lower() in server_value:
+                        matched = True
+                        break
 
-            # Test body patterns
-            for pattern in sig.body_patterns:
-                if pattern.lower() in body_lower:
-                    return f"waf:{waf_id}"
+            if not matched and status_code in sig.block_status_codes:
+                # Body patterns uniquement sur les réponses de blocage pour limiter les faux positifs
+                for pattern in sig.body_patterns:
+                    if pattern.lower() in body_lower:
+                        matched = True
+                        break
+
+            if matched:
+                return f"waf:{waf_id}"
 
         # Fallback generic
         generic_sig = self._waf_signatures.get("generic")
