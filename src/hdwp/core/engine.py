@@ -191,6 +191,14 @@ class HDWPEngine:
         # Plugin registry
         registry = PluginRegistry()
         registry.discover()
+
+        # Phase 0.1: Initialize PayloadDatabase singleton before plugin enabling
+        from hdwp.store.payload_database import get_payload_database
+        payload_db = get_payload_database()
+        payload_db.load_all()
+        log.info("engine.payload_database_loaded",
+                 plugins_with_payloads=payload_db.get_loaded_plugins())
+
         disabled_ids = set(context.config.plugins.disabled)
         if plugin_ids:
             for pid in plugin_ids:

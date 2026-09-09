@@ -139,7 +139,21 @@ class TuningConfig(BaseModel):
     v2_weight_causal_depth: float = 1.2
     v2_bias: float = -4.0
 
-    # Note: Validation range [-6, 6] appliquée via FeedbackLoop constraints (ADR-ML-009)
+    # Phase 0.1: Validation range [-6, 6] pour éviter sigmoid explosion
+    @field_validator(
+        'v2_weight_oracle_strength', 'v2_weight_reproducibility',
+        'v2_weight_observation_quality', 'v2_weight_behavioral_specificity',
+        'v2_weight_experiment_coverage', 'v2_weight_temporal_signal',
+        'v2_weight_crossrole_signal', 'v2_weight_invariant_violated',
+        'v2_weight_waf_bypass_success', 'v2_weight_causal_depth',
+        'v2_bias'
+    )
+    @classmethod
+    def validate_v2_weight_range(cls, v: float) -> float:
+        """Valide que les poids V2 sont dans [-6, 6] (ADR-ML-009)."""
+        if not -6.0 <= v <= 6.0:
+            raise ValueError(f"V2 weight must be in [-6, 6], got {v}")
+        return v
 
 
 class HDWPContextConfig(BaseModel):

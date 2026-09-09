@@ -440,6 +440,7 @@ class SemanticOracle:
                 confidence_v2=self._confidence_v2,
                 v1_overall=v1_overall,
                 v2_overall=v2_overall,
+                confirmed_threshold=confirmed_threshold,  # Phase 0.1
             )
             # Enrichir le conseil de remédiation via LLM si disponible
             if self._llm_layer is not None:
@@ -483,6 +484,7 @@ class SemanticOracle:
             finding = _build_finding(
                 hyp_id, score, assessments[0], diffs, all_results, baseline, status="REFUTED",
                 severity_high=severity_high, severity_medium=severity_medium,
+                confirmed_threshold=confirmed_threshold,  # Phase 0.1
             )
             await self._repo.update_hypothesis_status(hyp_id, "REFUTED", score.overall)
             await self._bus.emit(
@@ -589,6 +591,7 @@ def _build_finding(
     confidence_v2: ConfidenceModelV2 | None = None,
     v1_overall: float = 0.0,
     v2_overall: float = 0.0,
+    confirmed_threshold: float = 0.85,  # Phase 0.1: Track threshold used
 ) -> Finding:
     mutation_type = baseline.experiment_spec.mutation_type
     from hdwp.core.mutation_registry import owasp_cwe, remediation
@@ -635,6 +638,7 @@ def _build_finding(
             "winning_response_sample": str(winning.response_received.body)[:2000] if winning and winning.response_received else None,
         },
         remediation_hint=remediation(mutation_type),
+        confirmed_threshold_used=confirmed_threshold,  # Phase 0.1: Track threshold
     )
 
 

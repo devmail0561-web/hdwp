@@ -14,6 +14,7 @@ Sources de chargement (priorité décroissante) :
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -73,12 +74,14 @@ class PayloadDatabase:
     """
 
     _instance: PayloadDatabase | None = None
+    _lock = threading.Lock()  # Phase 0.1: Thread-safe singleton
 
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
 
     def __init__(self):
         if self._initialized:
@@ -124,20 +127,34 @@ class PayloadDatabase:
             try:
                 self._load_payload_file(yaml_file, source)
             except Exception as e:
+                # Phase 0.1: Log mais continue (graceful degradation)
                 logger.error(f"Failed to load {yaml_file} from {source}: {e}")
 
     def _load_payload_file(self, file_path: Path, source: str) -> None:
         """Charge un fichier YAML de payloads."""
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-
-        if not data:
-            logger.warning(f"Empty payload file: {file_path}")
+        # Phase 0.1: Explicit YAML error handling
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            logger.error(f"YAML syntax error in {file_path}: {e}")
+            return
+        except Exception as e:
+            logger.error(f"Failed to read {file_path}: {e}")
             return
 
+        if not data or not isinstance(data, dict):
+            logger.warning(f"Empty or invalid YAML structure in {file_path}")
+            return
+
+        # Phase 0.1: Schema validation
         plugin_id = data.get("plugin_id")
         if not plugin_id:
-            logger.error(f"Missing plugin_id in {file_path}")
+            logger.error(f"Missing required field 'plugin_id' in {file_path}")
+            return
+
+        if "variants" not in data:
+            logger.error(f"Missing required field 'variants' in {file_path}")
             return
 
         # Parser les variantes

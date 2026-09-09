@@ -62,24 +62,13 @@ WEIGHT_MIN: float = -6.0
 WEIGHT_MAX: float = 6.0
 SESSION_DECAY: float = 0.95
 
-# Poids et biais initiaux (obsolète - Phase 0: lire depuis TuningConfig via extract_v2_weights_from_tuning)
-# Gardé pour backward compatibility si TuningConfig non fourni
-DEFAULT_WEIGHTS: dict[str, float] = {
-    "oracle_strength": 1.8,
-    "reproducibility": 2.2,
-    "observation_quality": 0.8,
-    "behavioral_specificity": 1.0,
-    "experiment_coverage": 0.7,
-    "temporal_signal": 1.5,
-    "crossrole_signal": 1.8,
-    "invariant_violated": 2.5,
-    "waf_bypass_success": 0.6,
-    "causal_depth": 1.2,
-}
-DEFAULT_BIAS: float = -4.0
-
-# Phase 0: importer extract_v2_weights_from_tuning pour synchronisation
-from hdwp.core.oracle.confidence import extract_v2_weights_from_tuning
+# Phase 0.1: Supprimer duplication DEFAULT_WEIGHTS
+# Importer depuis confidence.py (single source of truth)
+from hdwp.core.oracle.confidence import (
+    V2_DEFAULT_WEIGHTS,
+    V2_DEFAULT_BIAS,
+    extract_v2_weights_from_tuning,
+)
 
 
 def _sigmoid(x: float) -> float:
@@ -98,14 +87,14 @@ class FeedbackLoop:
     """
 
     def __init__(self, tuning: "TuningConfig | None" = None) -> None:
-        # Phase 0: initialiser depuis TuningConfig si fourni
+        # Phase 0.1: initialiser depuis TuningConfig ou V2_DEFAULT_WEIGHTS (single source)
         if tuning is not None:
             initial_weights, initial_bias = extract_v2_weights_from_tuning(tuning)
             self._weights: dict[str, float] = initial_weights
             self._bias: float = initial_bias
         else:
-            self._weights: dict[str, float] = dict(DEFAULT_WEIGHTS)
-            self._bias: float = DEFAULT_BIAS
+            self._weights: dict[str, float] = dict(V2_DEFAULT_WEIGHTS)
+            self._bias: float = V2_DEFAULT_BIAS
         self._n_updates: int = 0
 
     # ── Online learning ───────────────────────────────────────────────────────
@@ -150,11 +139,11 @@ class FeedbackLoop:
         """
         for dim in V2_DIMENSIONS:
             w = self._weights[dim]
-            default = DEFAULT_WEIGHTS[dim]
+            default = V2_DEFAULT_WEIGHTS[dim]
             # Décay vers la valeur par défaut : w = w · decay + default · (1 - decay)
             self._weights[dim] = round(w * SESSION_DECAY + default * (1.0 - SESSION_DECAY), 6)
         self._bias = round(
-            self._bias * SESSION_DECAY + DEFAULT_BIAS * (1.0 - SESSION_DECAY), 6
+            self._bias * SESSION_DECAY + V2_DEFAULT_BIAS * (1.0 - SESSION_DECAY), 6
         )
         if self._n_updates > 0:
             log.debug(
@@ -210,7 +199,7 @@ class FeedbackLoop:
     def drift(self) -> dict[str, float]:
         """Écart absolu moyen des poids par rapport aux défauts."""
         return {
-            dim: round(abs(self._weights[dim] - DEFAULT_WEIGHTS[dim]), 4)
+            dim: round(abs(self._weights[dim] - V2_DEFAULT_WEIGHTS[dim]), 4)
             for dim in V2_DIMENSIONS
         }
 
