@@ -88,3 +88,57 @@ class DeserializationPlugin(HDWPPlugin):
                     )],
                 ))
         return hyps
+
+
+# Phase 1: Mutation custom Deserialization avec magic bytes detection
+
+def register_deserialization_mutations() -> None:
+    """Enregistre mutation custom deserialization_probe dans MutationRegistry.
+
+    Phase 1 optionnel: Améliore la détection en cherchant magic bytes
+    Java (\xac\xed), Python (\x80\x03), PHP (O:) dans les réponses.
+    """
+    from hdwp.core.mutation_registry import register_mutation
+
+    MAGIC_BYTES = {
+        "java": b"\xac\xed",      # Java serialized object
+        "python": b"\x80\x03",    # Python pickle protocol 3
+        "php": b"O:",             # PHP serialized object
+    }
+
+    def assess_deserialization_probe(baseline, experiment, diff):
+        """Assess deserialization par détection magic bytes."""
+        from hdwp.core.oracle.violation_oracle import ViolationAssessment, ConfidenceLevel
+
+        body = experiment.response_received.body
+        body_bytes = body.encode() if isinstance(body, str) else body
+
+        # Détecter magic bytes dans réponse
+        for lang, magic in MAGIC_BYTES.items():
+            if magic in body_bytes:
+                return ViolationAssessment(
+                    violated=True,
+                    confidence=ConfidenceLevel.HIGH,
+                    verdict=f"Deserialization detected: {lang} magic bytes found",
+                    evidence=[f"Magic bytes {magic.hex()} found in response"],
+                )
+
+        # Fallback vers assess_field_injection
+        from hdwp.core.oracle.violation_oracle import _assess_field_injection
+        return _assess_field_injection(baseline, experiment, diff)
+
+    register_mutation(
+        name="deserialization_probe",
+        owasp_category="A08:2021",
+        cwe_id="CWE-502",
+        remediation="Avoid deserializing untrusted data; use safe serialization formats",
+        assess_violation=assess_deserialization_probe,
+    )
+
+
+# Auto-registration au chargement du module
+try:
+    register_deserialization_mutations()
+except Exception:
+    # Ignore si MutationRegistry pas encore initialisé
+    pass

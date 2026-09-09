@@ -169,3 +169,55 @@ class SSTIPlugin(HDWPPlugin):
             )
 
         return hypotheses
+
+
+# Phase 1: Mutation custom SSTI avec expected_result validation
+
+def register_ssti_mutations() -> None:
+    """Enregistre mutation custom ssti_evaluation dans MutationRegistry.
+
+    Phase 1 optionnel: Améliore la détection SSTI en comparant le résultat
+    avec expected_result (ex: {{7*7}} doit retourner "49").
+    """
+    from hdwp.core.mutation_registry import register_mutation
+
+    def assess_ssti_evaluation(baseline, experiment, diff):
+        """Assess SSTI par comparaison result vs expected_result."""
+        from hdwp.core.oracle.violation_oracle import ViolationAssessment, ConfidenceLevel
+
+        expected = experiment.mutation_params.get("expected_result")
+        if not expected:
+            # Pas d'expected_result → fallback vers assess_field_injection
+            from hdwp.core.oracle.violation_oracle import _assess_field_injection
+            return _assess_field_injection(baseline, experiment, diff)
+
+        # Vérifier si expected_result présent dans body
+        if expected in experiment.response_received.body:
+            return ViolationAssessment(
+                violated=True,
+                confidence=ConfidenceLevel.HIGH,
+                verdict=f"SSTI confirmed: template evaluated to expected result '{expected}'",
+                evidence=[f"Expected '{expected}' found in response body"],
+            )
+
+        return ViolationAssessment(
+            violated=False,
+            confidence=ConfidenceLevel.LOW,
+            verdict="SSTI not confirmed: expected result not found",
+        )
+
+    register_mutation(
+        name="ssti_evaluation",
+        owasp_category="A03:2021",
+        cwe_id="CWE-94",
+        remediation="Sanitize template parameters to prevent code execution",
+        assess_violation=assess_ssti_evaluation,
+    )
+
+
+# Auto-registration au chargement du module
+try:
+    register_ssti_mutations()
+except Exception:
+    # Ignore si MutationRegistry pas encore initialisé
+    pass

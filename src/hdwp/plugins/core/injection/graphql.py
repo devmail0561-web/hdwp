@@ -114,3 +114,62 @@ class GraphQLPlugin(HDWPPlugin):
                 )],
             ))
         return hyps
+
+
+# Phase 1: Mutation custom GraphQL avec schema keywords parsing
+
+def register_graphql_mutations() -> None:
+    """Enregistre mutation custom graphql_schema_query dans MutationRegistry.
+
+    Phase 1 optionnel: Améliore la détection GraphQL introspection en comptant
+    les keywords schema (__schema, __type, Query, Mutation).
+    """
+    from hdwp.core.mutation_registry import register_mutation
+
+    SCHEMA_KEYWORDS = [
+        "__schema",
+        "__type",
+        "introspection",
+        "Query",
+        "Mutation",
+        "Subscription",
+    ]
+
+    def assess_graphql_schema_query(baseline, experiment, diff):
+        """Assess GraphQL introspection par parsing schema keywords."""
+        from hdwp.core.oracle.violation_oracle import ViolationAssessment, ConfidenceLevel
+
+        body = experiment.response_received.body
+
+        # Compter keywords schema dans réponse
+        schema_count = sum(1 for kw in SCHEMA_KEYWORDS if kw in body)
+
+        if schema_count >= 3:
+            return ViolationAssessment(
+                violated=True,
+                confidence=ConfidenceLevel.HIGH,
+                verdict=f"GraphQL introspection enabled: {schema_count} schema keywords found",
+                evidence=[f"Schema keywords: {', '.join(kw for kw in SCHEMA_KEYWORDS if kw in body)}"],
+            )
+
+        return ViolationAssessment(
+            violated=False,
+            confidence=ConfidenceLevel.LOW,
+            verdict="GraphQL introspection not detected",
+        )
+
+    register_mutation(
+        name="graphql_schema_query",
+        owasp_category="A05:2021",
+        cwe_id="CWE-200",
+        remediation="Disable GraphQL introspection in production",
+        assess_violation=assess_graphql_schema_query,
+    )
+
+
+# Auto-registration au chargement du module
+try:
+    register_graphql_mutations()
+except Exception:
+    # Ignore si MutationRegistry pas encore initialisé
+    pass
