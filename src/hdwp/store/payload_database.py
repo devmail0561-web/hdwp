@@ -213,14 +213,20 @@ class PayloadDatabase:
         self,
         plugin_id: str,
         tech_stack: list[str] | None = None,
-        encoding: list[str] | None = None
+        encoding: list[str] | None = None,
+        auto_encode: bool = False,       # Phase 1: NOUVEAU
+        auto_obfuscate: bool = False,    # Phase 1: NOUVEAU
+        max_variants: int = 20,          # Phase 1: NOUVEAU
     ) -> list[PayloadVariant]:
         """Retourne les variantes de payloads pour un plugin.
 
         Args:
             plugin_id: ID du plugin (ex: core.injection.sqli)
             tech_stack: Filtrer par tech stack (ex: [mysql, mariadb])
-            encoding: Filtrer par encodings (non utilisé en Phase 0)
+            encoding: Filtrer par encodings (legacy, non utilisé)
+            auto_encode: Générer variantes encodées automatiquement (Phase 1)
+            auto_obfuscate: Générer variantes obfusquées automatiquement (Phase 1)
+            max_variants: Limite max de variantes par payload (Phase 1)
 
         Returns:
             Liste des PayloadVariant (JAMAIS None, retourne [] si non trouvé)
@@ -240,7 +246,112 @@ class PayloadDatabase:
                 if not v.tech_stack or tech_stack_set.intersection(v.tech_stack)
             ]
 
+        # Phase 1: Génération auto-variants si activée
+        if auto_encode or auto_obfuscate:
+            expanded_variants = []
+            for variant in variants:
+                # Ajouter variante originale
+                expanded_variants.append(variant)
+
+                # Générer variantes encodées
+                if auto_encode and variant.encoding_chains:
+                    expanded_variants.extend(
+                        self._generate_encoded_variants(variant, max_variants)
+                    )
+
+                # Générer variantes obfusquées
+                if auto_obfuscate and variant.obfuscation_techniques:
+                    expanded_variants.extend(
+                        self._generate_obfuscated_variants(variant, definition.payload_type, max_variants)
+                    )
+
+            return expanded_variants[:max_variants * len(variants)]
+
         return variants
+
+    def _generate_encoded_variants(
+        self,
+        variant: PayloadVariant,
+        max_variants: int,
+    ) -> list[PayloadVariant]:
+        """Génère variantes encodées depuis encoding_chains.
+
+        Args:
+            variant: Variante de payload originale
+            max_variants: Limite max de variantes
+
+        Returns:
+            Liste de PayloadVariant avec valeurs encodées
+        """
+        from hdwp.core.experiment.encoder_registry import get_encoder_registry
+
+        registry = get_encoder_registry()
+        encoded_variants = []
+
+        for chain in variant.encoding_chains[:max_variants]:
+            try:
+                encoded_value = registry.apply_chain(str(variant.value), list(chain))
+
+                # Créer nouvelle PayloadVariant avec valeur encodée
+                encoded_variant = PayloadVariant(
+                    id=f"{variant.id}_encoded_{'_'.join(chain)}",
+                    value=encoded_value,
+                    tech_stack=variant.tech_stack,
+                    expected_result=variant.expected_result,
+                    confidence_boost=variant.confidence_boost + 0.05,  # Boost encoding bypass
+                    detection=variant.detection,
+                    encoding_chains=tuple(),  # Déjà appliqué
+                    obfuscation_techniques=variant.obfuscation_techniques,
+                )
+                encoded_variants.append(encoded_variant)
+            except Exception as exc:
+                logger.debug(f"Failed to encode variant {variant.id} with chain {chain}: {exc}")
+                continue
+
+        return encoded_variants
+
+    def _generate_obfuscated_variants(
+        self,
+        variant: PayloadVariant,
+        payload_type: str,
+        max_variants: int,
+    ) -> list[PayloadVariant]:
+        """Génère variantes obfusquées depuis obfuscation_techniques.
+
+        Args:
+            variant: Variante de payload originale
+            payload_type: Type de payload (sqli, cmdi, xss)
+            max_variants: Limite max de variantes
+
+        Returns:
+            Liste de PayloadVariant avec valeurs obfusquées
+        """
+        from hdwp.core.payloads.obfuscation.obfuscator_registry import get_obfuscator_registry
+
+        registry = get_obfuscator_registry()
+        obfuscated_variants = []
+
+        for technique_name in variant.obfuscation_techniques[:max_variants]:
+            try:
+                obfuscated_value = registry.obfuscate(str(variant.value), technique_name)
+
+                # Créer nouvelle PayloadVariant avec valeur obfusquée
+                obfuscated_variant = PayloadVariant(
+                    id=f"{variant.id}_obfuscated_{technique_name}",
+                    value=obfuscated_value,
+                    tech_stack=variant.tech_stack,
+                    expected_result=variant.expected_result,
+                    confidence_boost=variant.confidence_boost + 0.08,  # Boost obfuscation
+                    detection=variant.detection,
+                    encoding_chains=variant.encoding_chains,
+                    obfuscation_techniques=tuple(),  # Déjà appliqué
+                )
+                obfuscated_variants.append(obfuscated_variant)
+            except Exception as exc:
+                logger.debug(f"Failed to obfuscate variant {variant.id} with {technique_name}: {exc}")
+                continue
+
+        return obfuscated_variants
 
     def get_keywords(self, plugin_id: str) -> list[str]:
         """Retourne les keywords pour identifier paramètres candidats.

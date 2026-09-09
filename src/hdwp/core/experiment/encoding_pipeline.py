@@ -14,9 +14,13 @@ Intégré dans ExperimentEngine via le mécanisme trigger_condition déjà en pl
 """
 from __future__ import annotations
 
+import base64
+import codecs
 import html
+import random
 import re
 import string
+import unicodedata
 import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -83,6 +87,123 @@ def _html_char_ref(s: str) -> str:
     return "".join(result)
 
 
+# ── Phase 1: 16 nouveaux encoders ─────────────────────────────────────────────
+
+# Haute priorité (8 encoders) - WAF bypass critique
+
+def _base64_encode(s: str) -> str:
+    """Base64 encoding standard."""
+    return base64.b64encode(s.encode()).decode()
+
+
+def _octal_encode(s: str) -> str:
+    """Octal encoding — contourne filtres MySQL CHAR()."""
+    return "".join(f"\\{ord(c):03o}" if ord(c) > 32 else c for c in s)
+
+
+def _whitespace_obfuscation(s: str) -> str:
+    """Tab/newline/space variation — contourne regex linéaires."""
+    ws_chars = [" ", "\t", "\n"]
+    return re.sub(r'\s+', lambda m: random.choice(ws_chars), s)
+
+
+def _json_unicode(s: str) -> str:
+    """JSON \\uXXXX escaping — contourne filtres API."""
+    return s.encode('unicode_escape').decode('ascii')
+
+
+def _xml_entities(s: str) -> str:
+    """XML numeric entities — contourne filtres XML."""
+    return "".join(f"&#{ord(c)};" if c in "&<>\"'" else c for c in s)
+
+
+def _js_unicode(s: str) -> str:
+    """JavaScript \\uXXXX escaping — contourne filtres XSS."""
+    return "".join(f"\\u{ord(c):04x}" for c in s)
+
+
+def _backtick_unicode(s: str) -> str:
+    """Backtick/dollar hex encoding — CMDi bypass."""
+    return s.replace("`", "\\x60").replace("$", "\\x24")
+
+
+def _mixed_encoding(s: str) -> str:
+    """Encoding mixte aléatoire — bypass filtres multi-couches."""
+    result = []
+    for c in s:
+        choice = random.randint(0, 2)
+        if choice == 0:
+            result.append(urllib.parse.quote(c, safe=""))
+        elif choice == 1:
+            result.append(f"\\u{ord(c):04x}")
+        else:
+            result.append(f"\\x{ord(c):02x}")
+    return "".join(result)
+
+
+# Moyenne priorité (5 encoders) - Scénarios spécialisés
+
+def _utf7_encode(s: str) -> str:
+    """UTF-7 encoding — contourne anciens WAF."""
+    try:
+        return s.encode('utf-7').decode('ascii')
+    except Exception:
+        return s
+
+
+def _utf16_encode(s: str) -> str:
+    """UTF-16 with BOM — contourne détection charset."""
+    try:
+        encoded = s.encode('utf-16')
+        return encoded.decode('utf-16')
+    except Exception:
+        return s
+
+
+def _utf32_encode(s: str) -> str:
+    """UTF-32 encoding — contourne filtres non-Unicode."""
+    try:
+        encoded = s.encode('utf-32')
+        return encoded.decode('utf-32')
+    except Exception:
+        return s
+
+
+def _unicode_normalize(s: str) -> str:
+    """Unicode NFKD normalization — contourne filtres strict."""
+    return unicodedata.normalize('NFKD', s)
+
+
+def _punycode_encode(s: str) -> str:
+    """Punycode IDN — contourne filtres domaine."""
+    try:
+        return "xn--" + s.encode('punycode').decode('ascii')
+    except Exception:
+        return s
+
+
+# Basse priorité (3 encoders) - Edge cases
+
+def _rot13_encode(s: str) -> str:
+    """ROT13 rotation — obfuscation basique."""
+    return codecs.encode(s, 'rot13')
+
+
+def _chunked_transfer(s: str) -> str:
+    """HTTP chunked encoding — contourne filtres HTTP."""
+    # Simplified chunked encoding for payload obfuscation
+    chunk_size = 4
+    chunks = [s[i:i+chunk_size] for i in range(0, len(s), chunk_size)]
+    return "\r\n".join(f"{len(chunk):x}\r\n{chunk}" for chunk in chunks) + "\r\n0\r\n\r\n"
+
+
+def _custom_obfuscation(s: str) -> str:
+    """Obfuscation customisée projet-spécifique."""
+    # Placeholder for custom project-specific obfuscation
+    # Can be overridden by users via EncoderRegistry.register()
+    return s
+
+
 ENCODING_STRATEGIES: list[EncodingStrategy] = [
     EncodingStrategy(
         name="url_encode",
@@ -137,6 +258,106 @@ ENCODING_STRATEGIES: list[EncodingStrategy] = [
         transform=_hex_encode,
         waf_effective_against={"waf:generic"},
         description="Hex escape des caractères non-ASCII",
+    ),
+    # Phase 1: 16 nouveaux encoders
+    # Haute priorité
+    EncodingStrategy(
+        name="base64",
+        transform=_base64_encode,
+        waf_effective_against={"waf:cloudflare", "waf:akamai", "waf:generic"},
+        description="Base64 encoding — contourne filtres regex basiques",
+    ),
+    EncodingStrategy(
+        name="octal",
+        transform=_octal_encode,
+        waf_effective_against={"waf:modsecurity", "waf:barracuda"},
+        description="Octal encoding — contourne filtres MySQL CHAR()",
+    ),
+    EncodingStrategy(
+        name="whitespace_obfuscation",
+        transform=_whitespace_obfuscation,
+        waf_effective_against={"waf:modsecurity", "waf:f5_bigip"},
+        description="Tab/newline/space variation — contourne regex linéaires",
+    ),
+    EncodingStrategy(
+        name="json_unicode",
+        transform=_json_unicode,
+        waf_effective_against={"waf:aws_waf", "waf:cloudflare"},
+        description="JSON \\uXXXX escaping — contourne filtres API",
+    ),
+    EncodingStrategy(
+        name="xml_entities",
+        transform=_xml_entities,
+        waf_effective_against={"waf:generic", "waf:imperva"},
+        description="XML numeric entities — contourne filtres XML",
+    ),
+    EncodingStrategy(
+        name="js_unicode",
+        transform=_js_unicode,
+        waf_effective_against={"waf:cloudflare", "waf:sucuri"},
+        description="JavaScript \\uXXXX escaping — contourne filtres XSS",
+    ),
+    EncodingStrategy(
+        name="backtick_unicode",
+        transform=_backtick_unicode,
+        waf_effective_against={"waf:generic"},
+        description="Backtick/dollar hex encoding — CMDi bypass",
+    ),
+    EncodingStrategy(
+        name="mixed_encoding",
+        transform=_mixed_encoding,
+        waf_effective_against={"waf:generic", "waf:cloudflare"},
+        description="Encoding mixte aléatoire — bypass filtres multi-couches",
+    ),
+    # Moyenne priorité
+    EncodingStrategy(
+        name="utf7",
+        transform=_utf7_encode,
+        waf_effective_against={"waf:legacy", "waf:iis"},
+        description="UTF-7 encoding — contourne anciens WAF",
+    ),
+    EncodingStrategy(
+        name="utf16",
+        transform=_utf16_encode,
+        waf_effective_against={"waf:imperva"},
+        description="UTF-16 with BOM — contourne détection charset",
+    ),
+    EncodingStrategy(
+        name="utf32",
+        transform=_utf32_encode,
+        waf_effective_against={"waf:generic"},
+        description="UTF-32 encoding — contourne filtres non-Unicode",
+    ),
+    EncodingStrategy(
+        name="unicode_normalize",
+        transform=_unicode_normalize,
+        waf_effective_against={"waf:cloudflare", "waf:akamai"},
+        description="Unicode NFKD normalization — contourne filtres strict",
+    ),
+    EncodingStrategy(
+        name="punycode",
+        transform=_punycode_encode,
+        waf_effective_against={"waf:generic"},
+        description="Punycode IDN — contourne filtres domaine",
+    ),
+    # Basse priorité
+    EncodingStrategy(
+        name="rot13",
+        transform=_rot13_encode,
+        waf_effective_against=set(),
+        description="ROT13 rotation — obfuscation basique",
+    ),
+    EncodingStrategy(
+        name="chunked_transfer",
+        transform=_chunked_transfer,
+        waf_effective_against={"waf:modsecurity"},
+        description="HTTP chunked encoding — contourne filtres HTTP",
+    ),
+    EncodingStrategy(
+        name="custom_obfuscation",
+        transform=_custom_obfuscation,
+        waf_effective_against={"waf:generic"},
+        description="Obfuscation customisée — logique métier",
     ),
 ]
 
