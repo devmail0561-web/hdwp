@@ -275,8 +275,10 @@ class PayloadDatabase:
                         self._generate_obfuscated_variants(variant, definition.payload_type, max_variants)
                     )
 
-            # +1 par variant source pour inclure la variante originale (non encodée)
-            return expanded_variants[:(max_variants + 1) * len(variants)]
+            # Pas de cap globale ici : _generate_encoded_variants et _generate_obfuscated_variants
+            # capent déjà individuellement à max_variants. Une slice ici tronquerait les variantes
+            # obfusquées quand auto_encode ET auto_obfuscate sont actifs simultanément.
+            return expanded_variants
 
         return variants
 
