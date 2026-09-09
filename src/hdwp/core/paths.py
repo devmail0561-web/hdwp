@@ -13,6 +13,8 @@ KNOWLEDGE_DB = HDWP_HOME / "knowledge.db"
 CONTEXTS_DIR = HDWP_HOME / "contexts"
 PLUGINS_DIR = HDWP_HOME / "plugins"
 WORKSPACES_DIR = HDWP_HOME / "workspaces"
+EXPLOIT_STRATEGIES_DIR = HDWP_HOME / "exploit_strategies"
+EXPLOIT_STRATEGIES_CONFIG = HDWP_HOME / "exploit_strategies_config.json"
 
 
 def workspace_dir(session_id: str) -> Path:

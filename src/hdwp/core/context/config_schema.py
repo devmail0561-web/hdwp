@@ -90,6 +90,12 @@ class PluginConfig(BaseModel):
     config: dict[str, dict[str, Any]] = {}
 
 
+class ExploitStrategyConfig(BaseModel):
+    enabled: list[str] = []
+    disabled: list[str] = []
+    config: dict[str, dict[str, Any]] = {}
+
+
 class TuningConfig(BaseModel):
     """Réglages fins du moteur — toutes les valeurs ont des défauts sûrs."""
 
@@ -126,6 +132,7 @@ class HDWPContextConfig(BaseModel):
     roles: list[RoleConfig] = []
     options: OptionsConfig = OptionsConfig()
     plugins: PluginConfig = PluginConfig()
+    exploit_strategies: ExploitStrategyConfig = ExploitStrategyConfig()
     discovery: DiscoveryConfig = DiscoveryConfig()
     llm: LLMConfig = LLMConfig()
     tuning: TuningConfig = TuningConfig()

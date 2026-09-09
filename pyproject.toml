@@ -115,6 +115,7 @@ path = "hatch_build.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/hdwp"]
 artifacts = ["src/hdwp/app/dist/**"]
+include = ["src/hdwp/**/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

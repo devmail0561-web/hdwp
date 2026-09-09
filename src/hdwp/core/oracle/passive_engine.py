@@ -45,6 +45,30 @@ MISSING_HEADER_FINDINGS: dict[str, tuple[str, str, str, str]] = {
         "X-Content-Type-Options absent",
         "A05:2021", "CWE-693", "INFO",
     ),
+    "missing:XXP": (
+        "X-XSS-Protection absent",
+        "A05:2021", "CWE-693", "INFO",
+    ),
+    "missing:RP": (
+        "Referrer-Policy absent",
+        "A05:2021", "CWE-116", "INFO",
+    ),
+    "missing:PERMISSIONS_POLICY": (
+        "Permissions-Policy absent",
+        "A05:2021", "CWE-693", "INFO",
+    ),
+    "missing:COOP": (
+        "Cross-Origin-Opener-Policy absent",
+        "A05:2021", "CWE-346", "LOW",
+    ),
+    "missing:COEP": (
+        "Cross-Origin-Embedder-Policy absent",
+        "A05:2021", "CWE-346", "LOW",
+    ),
+    "missing:CORP": (
+        "Cross-Origin-Resource-Policy absent",
+        "A05:2021", "CWE-346", "LOW",
+    ),
 }
 
 COOKIE_FLAG_FINDINGS: dict[str, tuple[str, str, str, str, str]] = {
