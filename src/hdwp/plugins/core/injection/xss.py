@@ -31,6 +31,19 @@ XSS_PARAM_KEYWORDS = frozenset({
     "content", "body", "search", "query", "feedback", "review",
 })
 
+# Phase 1: Mapping ADAPTIVE_CHAINS pour PayloadDatabase
+# Mappe les variant IDs (depuis xss_payloads.yaml) aux triggers et follow-ups
+ADAPTIVE_CHAINS = {
+    "script_basic": {
+        "trigger": {"type": "body_not_contains", "value": "<script>alert(1)"},
+        "follow_ups": ["encoded_payload", "event_handlers", "polyglot"],
+    },
+    "img_onerror": {
+        "trigger": {"type": "body_not_contains", "value": "onerror"},
+        "follow_ups": ["svg_onload", "attribute_breakout"],
+    },
+}
+
 # Payloads XSS legacy — utilisés en fallback si PayloadDatabase indisponible (Phase 0)
 XSS_PAYLOADS = [
     "<script>alert(1)</script>",                             # direct reflection
@@ -102,6 +115,101 @@ class XSSPlugin(HDWPPlugin):
 
         return properties
 
+    def _build_adaptive_experiments(
+        self,
+        param: "Parameter",
+        ep_path: str,
+        variants: list["PayloadVariant"],
+    ) -> list[ExperimentSpec]:
+        """Construit ExperimentSpec avec trigger_condition + follow_up_specs.
+
+        Phase 1: Utilise PayloadDatabase variants avec mapping ADAPTIVE_CHAINS.
+
+        Args:
+            param: Paramètre cible
+            ep_path: Path de l'endpoint
+            variants: PayloadVariant depuis PayloadDatabase (avec auto-encoding)
+
+        Returns:
+            Liste d'ExperimentSpec avec logique adaptative
+        """
+        experiments = []
+
+        # Grouper variants par ID de base
+        variants_by_base_id = {}
+        for variant in variants:
+            base_id = variant.id.split("_encoded_")[0].split("_obfuscated_")[0]
+            if base_id not in variants_by_base_id:
+                variants_by_base_id[base_id] = []
+            variants_by_base_id[base_id].append(variant)
+
+        # Construire chaînes adaptatives
+        for base_id, variant_list in variants_by_base_id.items():
+            if base_id not in ADAPTIVE_CHAINS:
+                # Pas de chaîne adaptative → expériment simple
+                for variant in variant_list[:3]:
+                    experiments.append(
+                        ExperimentSpec(
+                            mutation_type="field_injection",
+                            base_request=NormalizedRequest(method="GET", url=""),
+                            mutation_params={
+                                "parameter_name": param.name,
+                                "parameter_location": param.location,
+                                "payload": variant.value,
+                                "payload_type": "xss",
+                                "endpoint_path": ep_path,
+                            },
+                            description=f"XSS test: {param.name}={variant.id}",
+                        )
+                    )
+                continue
+
+            # Récupérer mapping adaptif
+            adaptive_mapping = ADAPTIVE_CHAINS[base_id]
+            trigger_condition = adaptive_mapping["trigger"]
+            follow_up_ids = adaptive_mapping["follow_ups"]
+
+            # Construire follow-up specs
+            follow_up_specs = []
+            for follow_up_id in follow_up_ids:
+                follow_up_variants = variants_by_base_id.get(follow_up_id, [])
+                for fv in follow_up_variants[:2]:
+                    follow_up_specs.append(
+                        ExperimentSpec(
+                            mutation_type="field_injection",
+                            base_request=NormalizedRequest(method="GET", url=""),
+                            mutation_params={
+                                "parameter_name": param.name,
+                                "parameter_location": param.location,
+                                "payload": fv.value,
+                                "payload_type": "xss",
+                                "endpoint_path": ep_path,
+                            },
+                            description=f"XSS follow-up: {fv.id}",
+                        )
+                    )
+
+            # Créer sonde racine avec trigger + follow-ups
+            root_variant = variant_list[0]
+            experiments.append(
+                ExperimentSpec(
+                    mutation_type="field_injection",
+                    base_request=NormalizedRequest(method="GET", url=""),
+                    mutation_params={
+                        "parameter_name": param.name,
+                        "parameter_location": param.location,
+                        "payload": root_variant.value,
+                        "payload_type": "xss",
+                        "endpoint_path": ep_path,
+                    },
+                    description=f"XSS probe: {base_id} {param.name}",
+                    trigger_condition=trigger_condition,
+                    follow_up_specs=follow_up_specs,
+                )
+            )
+
+        return experiments
+
     def generate_hypotheses(self, model: ApplicationModelData) -> list[Hypothesis]:
         """Génère des hypothèses XSS pour les paramètres candidats."""
         hypotheses: list[Hypothesis] = []
@@ -129,10 +237,30 @@ class XSSPlugin(HDWPPlugin):
             if content_type and "json" in content_type.lower() and "html" not in content_type.lower():
                 continue
 
-            # Chaîne adaptative XSS :
-            # Sonde 1 : payload brut → si réfléchi tel quel → CONFIRMED
-            # Si filtré (body_not_contains) → essayer les variantes encodées/bypass
-            sonde_basic = ExperimentSpec(
+            experiments = []
+
+            # Phase 1: Charger depuis PayloadDatabase avec auto-encoding/obfuscation
+            if self._payload_db:
+                payload_variants = self._payload_db.get_payloads(
+                    self.id,
+                    tech_stack=model.tech_stack,
+                    auto_encode=True,       # Activer auto-encoding
+                    auto_obfuscate=True,    # Activer auto-obfuscation
+                    max_variants=20
+                )
+
+                # Construire chaînes adaptatives depuis PayloadDatabase
+                if payload_variants:
+                    experiments = self._build_adaptive_experiments(
+                        param, ep_path, payload_variants
+                    )
+
+            # Fallback vers chaîne adaptative legacy inline
+            if not experiments:
+                # Chaîne adaptative XSS :
+                # Sonde 1 : payload brut → si réfléchi tel quel → CONFIRMED
+                # Si filtré (body_not_contains) → essayer les variantes encodées/bypass
+                sonde_basic = ExperimentSpec(
                 mutation_type="field_injection",
                 base_request=NormalizedRequest(method="GET", url=""),
                 mutation_params={
@@ -175,6 +303,7 @@ class XSSPlugin(HDWPPlugin):
                     ),
                 ],
             )
+                experiments = [sonde_basic]
 
             hypotheses.append(
                 Hypothesis(
@@ -185,7 +314,7 @@ class XSSPlugin(HDWPPlugin):
                     ),
                     priority="HIGH",
                     priority_rationale="XSS permet vol de sessions et exécution de code côté client",
-                    required_experiments=[sonde_basic],
+                    required_experiments=experiments,
                 )
             )
 
