@@ -17,6 +17,14 @@ from pathlib import Path
 from hdwp.store.payload_database import PayloadDatabase, PayloadVariant
 
 
+@pytest.fixture(autouse=True)
+def reset_singleton():
+    """Réinitialise le singleton PayloadDatabase entre chaque test."""
+    PayloadDatabase._instance = None
+    yield
+    PayloadDatabase._instance = None
+
+
 class TestPayloadDatabaseYAMLLoading:
     """Test robustness of YAML loading."""
 

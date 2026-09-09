@@ -70,6 +70,10 @@ from hdwp.core.oracle.confidence import (
     extract_v2_weights_from_tuning,
 )
 
+# Aliases courts utilisés par les tests
+DEFAULT_WEIGHTS = V2_DEFAULT_WEIGHTS
+DEFAULT_BIAS = V2_DEFAULT_BIAS
+
 
 def _sigmoid(x: float) -> float:
     if x >= 0:

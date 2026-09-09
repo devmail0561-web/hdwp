@@ -222,7 +222,6 @@ class HDWPEngine:
         # Stratégies d'exploit : appliquer la config de mission sur le registry singleton
         from hdwp.core.exploit.strategy_registry import _default_registry as _exploit_registry
         _exploit_registry.apply_mission_config(context.config.exploit_strategies)
-        engine._exploit_registry = _exploit_registry
 
         # Enregistrer les mutations custom des plugins
         from hdwp.core import mutation_registry
@@ -412,6 +411,7 @@ class HDWPEngine:
         engine._threat_engine = threat_engine
         engine._invariant_store = invariant_store
         engine._prioritizer = prioritizer
+        engine._exploit_registry = _exploit_registry
         # V4 Sprint 10 : MetaLearner remplace les refs individuelles ML
         engine._ml = ml
         engine._target_hash = _target_hash
