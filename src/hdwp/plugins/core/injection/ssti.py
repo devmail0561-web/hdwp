@@ -39,6 +39,14 @@ SSTI_PAYLOADS = [
 class SSTIPlugin(HDWPPlugin):
     """Détecte les vulnérabilités Server-Side Template Injection."""
 
+    def __init__(self, payload_db: "PayloadDatabase | None" = None):
+        """Initialise le plugin SSTI avec PayloadDatabase optionnel.
+
+        Args:
+            payload_db: PayloadDatabase pour charger payloads depuis YAML (Phase 1)
+        """
+        self._payload_db = payload_db
+
     @property
     def id(self) -> str:
         return "core.injection.ssti"
@@ -103,21 +111,48 @@ class SSTIPlugin(HDWPPlugin):
 
         for param in candidates:
             experiments: list[ExperimentSpec] = []
-            for payload, expected in SSTI_PAYLOADS[:3]:
-                experiments.append(
-                    ExperimentSpec(
-                        mutation_type="field_injection",
-                        base_request=NormalizedRequest(method="GET", url=""),
-                        mutation_params={
-                            "parameter_name": param.name,
-                            "parameter_location": param.location,
-                            "payload": payload,
-                            "payload_type": "ssti",
-                            "expected_result": expected,
-                        },
-                        description=f"SSTI test: {param.name}={payload}",
-                    )
+
+            # Phase 1: Charger depuis PayloadDatabase avec auto-encoding
+            if self._payload_db:
+                payload_variants = self._payload_db.get_payloads(
+                    self.id,
+                    tech_stack=model.tech_stack,
+                    auto_encode=True,  # Activer auto-encoding
+                    max_variants=20
                 )
+                for variant in payload_variants[:3]:  # Limiter à 3 variantes
+                    experiments.append(
+                        ExperimentSpec(
+                            mutation_type="field_injection",
+                            base_request=NormalizedRequest(method="GET", url=""),
+                            mutation_params={
+                                "parameter_name": param.name,
+                                "parameter_location": param.location,
+                                "payload": variant.value,
+                                "payload_type": "ssti",
+                                "expected_result": variant.expected_result or "",
+                            },
+                            description=f"SSTI test: {param.name}={variant.id}",
+                        )
+                    )
+
+            # Fallback legacy si PayloadDatabase indisponible
+            if not experiments:
+                for payload, expected in SSTI_PAYLOADS[:3]:
+                    experiments.append(
+                        ExperimentSpec(
+                            mutation_type="field_injection",
+                            base_request=NormalizedRequest(method="GET", url=""),
+                            mutation_params={
+                                "parameter_name": param.name,
+                                "parameter_location": param.location,
+                                "payload": payload,
+                                "payload_type": "ssti",
+                                "expected_result": expected,
+                            },
+                            description=f"SSTI test: {param.name}={payload}",
+                        )
+                    )
 
             hypotheses.append(
                 Hypothesis(

