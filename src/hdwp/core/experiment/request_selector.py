@@ -420,6 +420,17 @@ def plan_field_injection(
                 if plans:
                     return plans
 
+    # Priorité 4 : fallback absolu — corpus non vide mais aucun paramètre correspondant trouvé.
+    # Retourner un plan sur la première entrée disponible : l'applier tentera l'injection.
+    if endpoint_path:
+        for path, requests in corpus.items():
+            if (endpoint_path in path or path in endpoint_path) and requests:
+                role_name, req = requests[0]
+                return [_make_plan(req, role_name)]
+    for path, requests in corpus.items():
+        if requests:
+            role_name, req = requests[0]
+            return [_make_plan(req, role_name)]
     return []
 
 

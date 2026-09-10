@@ -156,6 +156,8 @@ class JSExtractor:
 def _is_valid_path(path: str) -> bool:
     if len(path) <= 3:
         return False
+    if "*" in path:
+        return False
     if path.endswith((".js", ".css", ".png", ".jpg", ".gif", ".ico", ".woff", ".map", ".svg", ".ttf")):
         return False
     if path.count("/") > 8:

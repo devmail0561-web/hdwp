@@ -357,7 +357,7 @@ class ActiveCrawler:
                         line = line.strip()
                         if line.lower().startswith(("disallow:", "allow:")):
                             part = line.split(":", 1)[1].strip()
-                            if part and part not in ("*", "/"):
+                            if part and part not in ("*", "/") and "*" not in part and "{" not in part:
                                 seeds.append(urljoin(seed_url, part))
                         elif line.lower().startswith("sitemap:"):
                             sitemap_url = line.split(":", 1)[1].strip()

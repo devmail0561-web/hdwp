@@ -178,6 +178,14 @@ class ExperimentEngine:
 
             # ── baseline (legitimate access) ──────────────────────────
             _baseline_key = (plan.baseline_request.url, plan.baseline_request.method, plan.baseline_role)
+            if "*" in plan.baseline_request.url:
+                log.debug(
+                    "experiment.baseline_wildcard_skip",
+                    hypothesis_id=hyp.id,
+                    url=plan.baseline_request.url,
+                )
+                self._invalid_baselines.add(_baseline_key)
+                continue
             if _baseline_key in self._invalid_baselines:
                 log.debug(
                     "experiment.baseline_cached_invalid",
