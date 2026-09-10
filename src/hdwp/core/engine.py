@@ -347,6 +347,8 @@ class HDWPEngine:
         from hdwp.core import http_client as _http_client
         _primary = proxy_url or context.config.options.tor_proxy
         _chain: list[str | None] = [_primary, *context.config.options.proxy_fallback]
+        if None not in _chain:
+            _chain.append(None)  # connexion directe toujours testée en dernier recours
         effective_proxy = await _http_client.resolve_proxy(_chain, context.base_url)
         _http_client.configure(effective_proxy)
 

@@ -9,6 +9,7 @@ const TABS: Tab[] = [
   { id: 'payload', label: '⬡ PAYLOAD', variant: 'warn' },
   { id: 'exploit', label: '⬡ EXPLOIT', variant: 'alert' },
   { id: 'plugins', label: '⬡ PLUGINS' },
+  { id: 'strategies', label: '⬡ STRATÉGIES' },
   { id: 'settings', label: '⬡ SETTINGS' },
 ]
 

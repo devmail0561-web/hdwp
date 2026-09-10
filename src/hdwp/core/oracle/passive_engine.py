@@ -164,9 +164,12 @@ class PassiveFindingEngine:
 
     def _analyse(self, obs: RawObservation) -> list[Finding]:
         findings: list[Finding] = []
-        findings.extend(self._check_missing_headers(obs))
-        findings.extend(self._check_server_disclosure(obs))
-        findings.extend(self._check_cookie_flags(obs))
+        status = obs.response.status_code if obs.response else 0
+        is_error = status >= 400 or status == 0
+        if not is_error:
+            findings.extend(self._check_missing_headers(obs))
+        findings.extend(self._check_server_disclosure(obs))  # version exposée même sur 4xx/5xx
+        findings.extend(self._check_cookie_flags(obs))  # inspecter aussi sur 4xx (pre-auth session cookies)
         findings.extend(self._check_stack_traces(obs))
         return findings
 
@@ -217,6 +220,7 @@ class PassiveFindingEngine:
                         "Désactiver les messages d'erreur détaillés en production. "
                         "Utiliser un gestionnaire d'erreurs générique."
                     ),
+                    passive_tags=["stack_trace"],
                 )]
         return []
 

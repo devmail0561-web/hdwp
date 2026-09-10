@@ -86,6 +86,49 @@ class AttackGraphPlanner:
     def _heuristic(self, state: AttackState, goal: GoalDefinition) -> float:
         return float(state.missing_for(goal.required_state))
 
+    def _relevant_transitions(self, goal: GoalDefinition) -> list[AttackTransition]:
+        """Backward-reachability: keep only transitions whose effects contribute to the goal."""
+        needed: set[tuple[str, str]] = set()
+        for key, values in goal.required_state.items():
+            for v in values:
+                needed.add((key, v))
+
+        relevant: set[int] = set()
+        changed = True
+        while changed:
+            changed = False
+            for i, t in enumerate(self._transitions):
+                if i in relevant:
+                    continue
+                if self._transition_contributes(t, needed):
+                    relevant.add(i)
+                    changed = True
+                    for key, values in t.preconditions.items():
+                        for v in values:
+                            needed.add((key, v))
+
+        return [self._transitions[i] for i in sorted(relevant)]
+
+    @staticmethod
+    def _transition_contributes(t: AttackTransition, needed: set[tuple[str, str]]) -> bool:
+        e = t.effects
+        for attr, granted in [
+            ("assets_readable", e.grants_readable),
+            ("assets_writable", e.grants_writable),
+            ("credentials_held", e.grants_credentials),
+            ("privileges", e.grants_privileges),
+        ]:
+            for v in granted:
+                if (attr, v) in needed:
+                    return True
+        for k in e.grants_knowledge:
+            if ("knowledge", k) in needed:
+                return True
+        for k in e.grants_tokens:
+            if ("session_tokens", k) in needed:
+                return True
+        return False
+
     def plan(
         self,
         initial_state: AttackState | None = None,
@@ -99,6 +142,10 @@ class AttackGraphPlanner:
             goal = self._select_best_goal(state)
             if goal is None:
                 return None
+
+        relevant = self._relevant_transitions(goal)
+        if not relevant:
+            return None
 
         start = _AStarNode(
             f_cost=self._heuristic(state, goal),
@@ -114,7 +161,7 @@ class AttackGraphPlanner:
         while open_set:
             if nodes_explored >= _ASTAR_MAX_NODES:
                 logger.warning("attack_graph.astar_budget_exceeded", goal=goal.goal_type.value,
-                               nodes=nodes_explored, transitions=len(self._transitions))
+                               nodes=nodes_explored, transitions=len(relevant))
                 return None
 
             current = heapq.heappop(open_set)
@@ -139,7 +186,7 @@ class AttackGraphPlanner:
                 continue
 
             path_ids = {t.finding_id for t in current.path}
-            for transition in self._transitions:
+            for transition in relevant:
                 if transition.finding_id in path_ids:
                     continue
 
@@ -271,7 +318,7 @@ class AttackGraphPlanner:
     def _build_request(self, transition: AttackTransition) -> Any:
         from hdwp.core.model.schemas import NormalizedRequest
         return NormalizedRequest(
-            method="GET",
+            method=transition.method or "GET",
             url=transition.endpoint or self._target_url,
         )
 
@@ -356,11 +403,12 @@ class AttackGraphPlanner:
             plan = self.plan(goal=goal)
             if plan:
                 plans.append({
-                    "goal_type": goal.goal_type.value,
+                    "chain_type": goal.goal_type.value,
+                    "description": goal.description,
+                    "precondition_finding_ids": [t.finding_id for t in plan],
+                    "executable": True,
                     "steps": len(plan),
                     "total_cost": sum(t.cost for t in plan),
-                    "finding_ids": [t.finding_id for t in plan],
-                    "description": goal.description,
                 })
         return plans
 

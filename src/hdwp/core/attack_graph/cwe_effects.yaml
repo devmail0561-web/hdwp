@@ -1,0 +1,50 @@
+# Mapping CWE → effets de sécurité pour le graphe d'attaque.
+# Chaque entrée définit les grants accordés par un finding de ce CWE.
+# Champs: grants_readable, grants_privileges, grants_credentials, grants_knowledge_key
+
+CWE-89:
+  grants_readable: [sensitive_data]
+  grants_knowledge_key: sqli
+CWE-564:
+  grants_readable: [sensitive_data]
+  grants_knowledge_key: sqli
+
+CWE-284:
+  grants_privileges: [elevated]
+  grants_knowledge_key: bola
+CWE-639:
+  grants_privileges: [elevated]
+  grants_knowledge_key: bola
+CWE-285:
+  grants_privileges: [elevated]
+  grants_knowledge_key: bola
+
+CWE-287:
+  grants_credentials: [victim_token, any_authenticated]
+  grants_privileges: [authenticated_as_victim]
+CWE-862:
+  grants_credentials: [victim_token, any_authenticated]
+  grants_privileges: [authenticated_as_victim]
+CWE-306:
+  grants_credentials: [victim_token, any_authenticated]
+  grants_privileges: [authenticated_as_victim]
+
+CWE-78:
+  grants_privileges: [rce]
+  grants_readable: [sensitive_data]
+CWE-77:
+  grants_privileges: [rce]
+  grants_readable: [sensitive_data]
+
+CWE-918:
+  grants_readable: [sensitive_data]
+  grants_knowledge_key: ssrf
+
+CWE-22:
+  grants_readable: [sensitive_data]
+CWE-23:
+  grants_readable: [sensitive_data]
+
+CWE-434:
+  grants_privileges: [rce]
+  grants_readable: [sensitive_data]

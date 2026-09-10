@@ -155,6 +155,25 @@ function DBTablesSection({ tables }: { tables: DBTable[] }) {
   )
 }
 
+// ── Physics helpers ──────────────────────────────────────────────────────────
+
+function applyHardClamp(nodes: NodeState[], W: number, H: number): void {
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const A = nodes[i], B = nodes[j]
+      const minDist = A.r + B.r + 12
+      const dx = A.x - B.x, dy = A.y - B.y
+      const dist = Math.max(Math.hypot(dx, dy), 0.1)
+      if (dist < minDist) {
+        const push = (minDist - dist) / 2
+        const nx = dx / dist, ny = dy / dist
+        if (!A.pinned) { A.x = Math.max(PAD, Math.min(W - PAD, A.x + nx * push)); A.y = Math.max(PAD, Math.min(H - PAD, A.y + ny * push)) }
+        if (!B.pinned) { B.x = Math.max(PAD, Math.min(W - PAD, B.x - nx * push)); B.y = Math.max(PAD, Math.min(H - PAD, B.y - ny * push)) }
+      }
+    }
+  }
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 export function FlowTab() {
@@ -261,7 +280,9 @@ export function FlowTab() {
           id: ep,
           x: PAD + depth * colStep + colStep * 0.5,
           y: PAD + i * rowStep + rowStep * 0.5,
-          vx: 0, vy: 0, pinned: false,
+          vx: (Math.random() - 0.5) * 10,
+          vy: (Math.random() - 0.5) * 10,
+          pinned: false,
           r: Math.min(18, 8 + (degree[ep] ?? 0) * 1.5),
         })
       })
@@ -270,14 +291,14 @@ export function FlowTab() {
     const nodeMap: Record<string, NodeState> = {}
     for (const n of nodes) nodeMap[n.id] = n
     const springLen = 130
-    for (let iter = 0; iter < 80; iter++) {
+    for (let iter = 0; iter < 200; iter++) {
       // Repulsion
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const A = nodes[i], B = nodes[j]
           const dx = A.x - B.x, dy = A.y - B.y
           const dist = Math.max(Math.hypot(dx, dy), 1)
-          const f = 2500 / (dist * dist)
+          const f = 8000 / (dist * dist)
           const fx = (dx / dist) * f, fy = (dy / dist) * f
           A.vx += fx; A.vy += fy
           B.vx -= fx; B.vy -= fy
@@ -300,7 +321,10 @@ export function FlowTab() {
         n.x = Math.max(PAD, Math.min(W - PAD, n.x + n.vx))
         n.y = Math.max(PAD, Math.min(H - PAD, n.y + n.vy))
       }
+      // Hard clamp toutes les 10 itérations pour limiter O(n²) sur graphes denses
+      if (iter % 10 === 9) applyHardClamp(nodes, W, H)
     }
+    applyHardClamp(nodes, W, H)  // passe finale
     // Zero velocities after warm-up
     for (const n of nodes) { n.vx = 0; n.vy = 0 }
 
@@ -361,7 +385,7 @@ export function FlowTab() {
             const A = nodes[i], B = nodes[j]
             const dx = A.x - B.x, dy = A.y - B.y
             const dist = Math.max(Math.hypot(dx, dy), 1)
-            const f = 2500 / (dist * dist)
+            const f = 8000 / (dist * dist)
             const fx = (dx / dist) * f, fy = (dy / dist) * f
             if (!A.pinned) { A.vx += fx; A.vy += fy }
             if (!B.pinned) { B.vx -= fx; B.vy -= fy }
@@ -386,6 +410,7 @@ export function FlowTab() {
             n.y = Math.max(PAD, Math.min(H - PAD, n.y + n.vy))
           }
         }
+        applyHardClamp(nodes, W, H)
       }
 
       // ── Render ────────────────────────────────────────────────────────────

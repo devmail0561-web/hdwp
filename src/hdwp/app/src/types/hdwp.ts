@@ -118,6 +118,19 @@ export interface Plugin {
   data_access: string
 }
 
+export interface Strategy {
+  id: string
+  name: string
+  vuln_type: string
+  description: string
+  source: string
+  proof_type: string
+  tech_stack: string[]
+  params: Record<string, unknown>
+  phases_count: number
+  enabled: boolean
+}
+
 export interface BehavioralProfile {
   mean: number
   std: number

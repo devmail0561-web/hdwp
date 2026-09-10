@@ -678,3 +678,126 @@ class RequestSelector:
         return mutation_registry.plan(
             spec.mutation_type, hyp, spec, model_snapshot, request_corpus
         )
+
+def plan_cache_poisoning(
+    hyp: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """Cache poisoning: inject X-Forwarded-Host on any cached endpoint."""
+    endpoint_path = spec.mutation_params.get("endpoint_path", "")
+    evil_host = spec.mutation_params.get("evil_host", "evil.hdwp-test.invalid")
+
+    for path, requests in corpus.items():
+        if not requests:
+            continue
+        if not endpoint_path or endpoint_path in path or path in endpoint_path:
+            role_name, req = requests[0]
+            if req.method in ("GET", "HEAD"):
+                return [ConcreteExperimentPlan(
+                    hypothesis_id=hyp.id,
+                    mutation_type="cache_poisoning",
+                    baseline_request=req,
+                    baseline_role=role_name,
+                    target_role=None,
+                    mutated_value=evil_host,
+                    mutated_param_name=None,
+                    mutated_param_location=None,
+                    description=f"Cache poisoning: X-Forwarded-Host: {evil_host} on {path}",
+                    experiment_spec=spec,
+                )]
+    return []
+
+
+def plan_http_smuggling(
+    hyp: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """HTTP smuggling: CL.TE / TE.CL probe on any endpoint."""
+    endpoint_path = spec.mutation_params.get("endpoint_path", "")
+
+    for path, requests in corpus.items():
+        if not requests:
+            continue
+        if not endpoint_path or endpoint_path in path or path in endpoint_path:
+            role_name, req = requests[0]
+            return [ConcreteExperimentPlan(
+                hypothesis_id=hyp.id,
+                mutation_type="http_smuggling",
+                baseline_request=req,
+                baseline_role=role_name,
+                target_role=None,
+                mutated_value="CL.TE",
+                mutated_param_name=None,
+                mutated_param_location=None,
+                description=f"HTTP smuggling: CL.TE probe on {path}",
+                experiment_spec=spec,
+            )]
+    return []
+
+
+def plan_info_disclosure(
+    hyp: Hypothesis,
+    spec: ExperimentSpec,
+    model: ApplicationModelData,
+    corpus: dict[str, list[tuple[str, NormalizedRequest]]],
+) -> list[ConcreteExperimentPlan]:
+    """Info disclosure: inject error-triggering values to expose stack traces."""
+    endpoint_path = spec.mutation_params.get("endpoint_path", "")
+    param_name = spec.mutation_params.get("parameter_name", "")
+    payload = spec.mutation_params.get("payload", "'\"<>%00")
+
+    for path, requests in corpus.items():
+        if not requests:
+            continue
+        if not endpoint_path or endpoint_path in path or path in endpoint_path:
+            for role_name, req in requests:
+                if param_name:
+                    value = extract_param_value(req, param_name, "query", path)
+                    if value is not None:
+                        return [ConcreteExperimentPlan(
+                            hypothesis_id=hyp.id,
+                            mutation_type="info_disclosure",
+                            baseline_request=req,
+                            baseline_role=role_name,
+                            target_role=None,
+                            mutated_value=payload,
+                            mutated_param_name=param_name,
+                            mutated_param_location="query",
+                            description=f"Info disclosure: inject {payload[:20]} into '{param_name}'",
+                            experiment_spec=spec,
+                        )]
+                elif req.query_params:
+                    first_param = next(iter(req.query_params))
+                    return [ConcreteExperimentPlan(
+                        hypothesis_id=hyp.id,
+                        mutation_type="info_disclosure",
+                        baseline_request=req,
+                        baseline_role=role_name,
+                        target_role=None,
+                        mutated_value=payload,
+                        mutated_param_name=first_param,
+                        mutated_param_location="query",
+                        description=f"Info disclosure: inject {payload[:20]} into '{first_param}'",
+                        experiment_spec=spec,
+                    )]
+    # Fallback: use first corpus entry with a path param or as-is
+    for path, requests in corpus.items():
+        if requests:
+            role_name, req = requests[0]
+            return [ConcreteExperimentPlan(
+                hypothesis_id=hyp.id,
+                mutation_type="info_disclosure",
+                baseline_request=req,
+                baseline_role=role_name,
+                target_role=None,
+                mutated_value=payload,
+                mutated_param_name="",
+                mutated_param_location="query",
+                description=f"Info disclosure: append error trigger to {path}",
+                experiment_spec=spec,
+            )]
+    return []

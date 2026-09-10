@@ -415,7 +415,7 @@ class ActiveCrawler:
                 else:
                     resp = await client.request(method, url, timeout=10.0)
             except httpx.HTTPError as exc:
-                log.warning("crawl.request_failed", url=url, method=method, error=str(exc))
+                log.warning("crawl.request_failed", url=url, method=method, error=str(exc) or type(exc).__name__)
                 continue
             elapsed_ms = (time.monotonic() - start) * 1000
 

@@ -289,7 +289,7 @@ class ContextualHypothesisEngine:
                                     required_experiments=[
                                         ExperimentSpec(
                                             mutation_type="field_injection",
-                                            base_request=NormalizedRequest(method="GET", url=ep.path),
+                                            base_request=NormalizedRequest(method=ep.methods[0] if ep.methods else "GET", url=ep.path),
                                             mutation_params={
                                                 "endpoint_path": ep.path,
                                                 "parameter_name": p.name,
@@ -415,27 +415,30 @@ class ContextualHypothesisEngine:
                     ],
                 ))
 
-        # BOLA / IDOR (CWE-639, CWE-284) : variantes d'ID
+        # BOLA / IDOR (CWE-639, CWE-284) : boundary probe avec les paramètres réels du finding
         elif cwe.endswith("-639") or cwe.endswith("-284") or mutation_type in ("identity_swap", "object_ref_change"):
-            for id_val in ("0", "-1", "999999"):
-                follow_ups.append(Hypothesis(
-                    source_plugin="contextual_hypothesis_engine.followup",
-                    property_id=prop_id,
-                    property_type="authorization",
-                    statement=f"BOLA ID variant {id_val} on {endpoint_path}",
-                    priority="HIGH",
-                    required_experiments=[
-                        ExperimentSpec(
-                            mutation_type="object_ref_change",
-                            base_request=NormalizedRequest(method=winning_method, url=endpoint_path),
-                            mutation_params={
-                                "endpoint_path": endpoint_path,
-                                "target_id": id_val,
-                                "followup_variant": f"id_{id_val}",
-                            },
-                        )
-                    ],
-                ))
+            _orig_params = proof.get("mutation_params") or {}
+            _param_name = _orig_params.get("parameter_name", "")
+            _param_location = _orig_params.get("parameter_location", "path")
+            follow_ups.append(Hypothesis(
+                source_plugin="contextual_hypothesis_engine.followup",
+                property_id=prop_id,
+                property_type="authorization",
+                statement=f"BOLA boundary probe on {endpoint_path}",
+                priority="HIGH",
+                required_experiments=[
+                    ExperimentSpec(
+                        mutation_type="object_ref_change",
+                        base_request=NormalizedRequest(method=winning_method, url=endpoint_path),
+                        mutation_params={
+                            "endpoint_path": endpoint_path,
+                            "parameter_name": _param_name,
+                            "parameter_location": _param_location,
+                            "followup_variant": "boundary_probe",
+                        },
+                    )
+                ],
+            ))
 
         for hyp in follow_ups:
             if self._add_hypothesis(hyp):

@@ -30,6 +30,8 @@ class InferenceRegistry:
         """Découvre les modules tiers via entry_points 'hdwp.inference'."""
         for ep in importlib.metadata.entry_points(group="hdwp.inference"):
             try:
+                if ep.name in self._modules:
+                    continue  # built-in enregistré explicitement prend la priorité
                 cls = ep.load()
                 self.register(ep.name, cls())
                 log.debug("inference.discovered", name=ep.name)

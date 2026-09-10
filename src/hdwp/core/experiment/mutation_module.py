@@ -422,6 +422,60 @@ def apply_http_method_fuzzing(plan: ConcreteExperimentPlan, sm: SessionManager) 
     return req.model_copy(update={"method": new_method, "headers": new_headers, "body": body})
 
 
+def apply_cache_poisoning(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
+    """Injecte X-Forwarded-Host et variantes pour empoisonner le cache."""
+    evil_host = plan.mutated_value or "evil.hdwp-test.invalid"
+    new_headers = {
+        **plan.baseline_request.headers,
+        "X-Forwarded-Host": evil_host,
+        "X-Original-URL": "/",
+        "X-Rewrite-URL": "/",
+    }
+    return plan.baseline_request.model_copy(update={"headers": new_headers})
+
+
+def apply_http_smuggling(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
+    """CL.TE probe : Content-Length + Transfer-Encoding conflictuels."""
+    smuggle_body = b"0\r\n\r\nGET /hdwp-smuggle-probe HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    new_headers = {
+        **plan.baseline_request.headers,
+        "Transfer-Encoding": "chunked",
+        "Content-Length": str(len(smuggle_body)),
+    }
+    return plan.baseline_request.model_copy(update={
+        "method": "POST",
+        "headers": new_headers,
+        "raw_body_override": smuggle_body,
+    })
+
+
+def apply_info_disclosure(plan: ConcreteExperimentPlan, sm: SessionManager) -> NormalizedRequest:
+    """Injecte des caractères d'erreur dans un paramètre pour provoquer un stack trace."""
+    req = plan.baseline_request
+    payload = plan.mutated_value or "'\"<>%00"
+    param_name = plan.mutated_param_name
+    param_location = plan.mutated_param_location or "query"
+
+    if param_location == "query":
+        new_params = dict(req.query_params)
+        if param_name:
+            new_params[param_name] = payload
+        else:
+            new_params["hdwp_probe"] = payload
+        return req.model_copy(update={
+            "url": _rebuild_url_with_params(req.url, new_params),
+            "query_params": new_params,
+        })
+    elif param_location == "body" and isinstance(req.body, dict):
+        new_body = dict(req.body)
+        new_body[param_name or "hdwp_probe"] = payload
+        return req.model_copy(update={"body": new_body})
+    return req.model_copy(update={
+        "url": _rebuild_url_with_params(req.url, {**req.query_params, "hdwp_probe": payload}),
+        "query_params": {**req.query_params, "hdwp_probe": payload},
+    })
+
+
 class MutationModule:
     """
     Applies a mutation to a reference request according to the provided plan.

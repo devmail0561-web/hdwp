@@ -147,18 +147,48 @@ class TestAttackTransitionFromFinding:
         assert t.finding_id == "FND-bola1"
         assert t.endpoint == "/api/users/123"
         assert "/api/users/123" in t.effects.grants_readable
+        assert "sensitive_data" in t.effects.grants_readable
         assert "any_authenticated" in t.preconditions.get("credentials_held", set())
 
     def test_sqli_finding(self) -> None:
         t = AttackTransition.from_finding(_make_sqli_finding())
         assert "/api/search:db" in t.effects.grants_readable
+        assert "sensitive_data" in t.effects.grants_readable
         assert t.effects.grants_knowledge.get("db_access") == "/api/search"
-        assert not t.preconditions  # no auth precondition for sqli
 
     def test_privesc_finding(self) -> None:
         t = AttackTransition.from_finding(_make_privesc_finding())
         assert "elevated" in t.effects.grants_privileges
         assert "any_authenticated" in t.preconditions.get("credentials_held", set())
+
+    def test_auth_finding(self) -> None:
+        finding = {"id": "FND-auth1", "property_type": "auth_bypass",
+                    "affected_endpoints": ["/api/login"], "confidence": 0.85}
+        t = AttackTransition.from_finding(finding)
+        assert "victim_token" in t.effects.grants_credentials
+        assert "any_authenticated" in t.effects.grants_credentials
+        assert "authenticated_as_victim" in t.effects.grants_privileges
+
+    def test_xss_finding(self) -> None:
+        finding = {"id": "FND-xss1", "property_type": "XSS_Reflected",
+                    "affected_endpoints": ["/search"], "confidence": 0.75}
+        t = AttackTransition.from_finding(finding)
+        assert "victim_token" in t.effects.grants_credentials
+        assert t.effects.grants_knowledge.get("xss_vector") == "/search"
+
+    def test_ssrf_finding(self) -> None:
+        finding = {"id": "FND-ssrf1", "property_type": "SSRF",
+                    "affected_endpoints": ["/api/fetch"], "confidence": 0.7}
+        t = AttackTransition.from_finding(finding)
+        assert "sensitive_data" in t.effects.grants_readable
+        assert "/api/fetch:internal" in t.effects.grants_readable
+
+    def test_unknown_finding_grants_knowledge(self) -> None:
+        finding = {"id": "FND-unk1", "property_type": "misc_issue",
+                    "affected_endpoints": ["/api/misc"], "confidence": 0.5}
+        t = AttackTransition.from_finding(finding)
+        assert "sensitive_data" not in t.effects.grants_readable
+        assert t.effects.grants_knowledge.get("endpoint:/api/misc") is True
 
     def test_cost_from_confidence(self) -> None:
         t = AttackTransition.from_finding(_make_bola_finding())  # confidence=0.8

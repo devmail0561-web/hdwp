@@ -347,9 +347,20 @@ class HDWPProxy:
             return
         self._running = True
         try:
-            self._server = await asyncio.start_server(
-                self._handle_client, self._host, self._port
-            )
+            for _ in range(10):
+                try:
+                    self._server = await asyncio.start_server(
+                        self._handle_client, self._host, self._port
+                    )
+                    break
+                except OSError as exc:
+                    if exc.errno != 98:  # EADDRINUSE
+                        raise
+                    log.warning("hdwp_proxy.port_in_use", port=self._port)
+                    self._port += 1
+            else:
+                log.error("hdwp_proxy.no_port_available")
+                return
             log.info("hdwp_proxy.started", address=self.address)
             async with self._server:
                 await self._server.serve_forever()

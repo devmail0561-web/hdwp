@@ -443,65 +443,52 @@ def _register_builtins() -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("mutation.builtin_register_failed", name=meta.get("name"), error=str(exc))
 
-    # Enrichissement avec plan/apply : isolation par import, chaque mutation independante.
+    # Enrichissement avec plan/apply : chaque mutation isolée pour résilience.
+    _plan_mod = None
+    _apply_mod = None
     try:
-        from hdwp.core.experiment.mutation_module import (
-            apply_boundary_value,
-            apply_field_injection,
-            apply_http_method_fuzzing,
-            apply_identity_swap,
-            apply_jwt_manipulation,
-            apply_method_override,
-            apply_nosqli,
-            apply_object_ref_change,
-            apply_open_redirect,
-            apply_origin_test,
-            apply_parameter_pollution,
-            apply_path_traversal,
-            apply_privilege_escalation,
-            apply_race_condition,
-            apply_token_reuse,
-            apply_type_confusion,
-        )
-        from hdwp.core.experiment.request_selector import (
-            plan_field_injection,
-            plan_http_method_fuzzing,
-            plan_identity_swap,
-            plan_jwt_manipulation,
-            plan_method_override,
-            plan_object_ref_change,
-            plan_origin_test,
-            plan_privilege_escalation,
-            plan_race_condition,
-            plan_token_reuse,
-        )
-
-        _plan_apply: list[tuple[str, object, object]] = [
-            ("identity_swap",        plan_identity_swap,        apply_identity_swap),
-            ("object_ref_change",    plan_object_ref_change,    apply_object_ref_change),
-            ("privilege_escalation", plan_privilege_escalation, apply_privilege_escalation),
-            ("field_injection",      plan_field_injection,      apply_field_injection),
-            ("jwt_manipulation",     plan_jwt_manipulation,     apply_jwt_manipulation),
-            ("origin_test",          plan_origin_test,          apply_origin_test),
-            ("race_condition",       plan_race_condition,       apply_race_condition),
-            ("token_reuse",          plan_token_reuse,          apply_token_reuse),
-            ("method_override",      plan_method_override,      apply_method_override),
-            ("path_traversal",       plan_field_injection,      apply_path_traversal),
-            ("nosqli",               plan_field_injection,      apply_nosqli),
-            ("open_redirect",        plan_field_injection,      apply_open_redirect),
-            ("http_method_fuzzing",  plan_http_method_fuzzing,  apply_http_method_fuzzing),
-            ("type_confusion",       plan_field_injection,      apply_type_confusion),
-            ("boundary_value",       plan_field_injection,      apply_boundary_value),
-            ("parameter_pollution",  plan_field_injection,      apply_parameter_pollution),
-        ]
-        for mut_name, plan_fn, apply_fn in _plan_apply:
-            entry = _MUTATIONS.get(mut_name)
-            if entry is not None:
-                # MutationSpec n'est pas frozen : mise a jour directe
-                entry.plan_experiment = plan_fn  # type: ignore[assignment]
-                entry.apply_mutation = apply_fn  # type: ignore[assignment]
+        from hdwp.core.experiment import request_selector as _plan_mod
+        from hdwp.core.experiment import mutation_module as _apply_mod
     except ImportError as exc:
-        log.warning("mutation.builtins_plan_apply_import_failed", error=str(exc))
+        log.warning("mutation.builtins_module_import_failed", error=str(exc))
+
+    if _plan_mod is not None and _apply_mod is not None:
+        _plan_apply: list[tuple[str, str, str]] = [
+            ("identity_swap",        "plan_identity_swap",       "apply_identity_swap"),
+            ("object_ref_change",    "plan_object_ref_change",   "apply_object_ref_change"),
+            ("privilege_escalation", "plan_privilege_escalation", "apply_privilege_escalation"),
+            ("field_injection",      "plan_field_injection",     "apply_field_injection"),
+            ("jwt_manipulation",     "plan_jwt_manipulation",    "apply_jwt_manipulation"),
+            ("origin_test",          "plan_origin_test",         "apply_origin_test"),
+            ("race_condition",       "plan_race_condition",      "apply_race_condition"),
+            ("token_reuse",          "plan_token_reuse",         "apply_token_reuse"),
+            ("method_override",      "plan_method_override",     "apply_method_override"),
+            ("path_traversal",       "plan_field_injection",     "apply_path_traversal"),
+            ("nosqli",               "plan_field_injection",     "apply_nosqli"),
+            ("open_redirect",        "plan_field_injection",     "apply_open_redirect"),
+            ("http_method_fuzzing",  "plan_http_method_fuzzing", "apply_http_method_fuzzing"),
+            ("type_confusion",       "plan_field_injection",     "apply_type_confusion"),
+            ("boundary_value",       "plan_field_injection",     "apply_boundary_value"),
+            ("parameter_pollution",  "plan_field_injection",     "apply_parameter_pollution"),
+            ("cache_poisoning",      "plan_cache_poisoning",     "apply_cache_poisoning"),
+            ("http_smuggling",       "plan_http_smuggling",      "apply_http_smuggling"),
+            ("info_disclosure",      "plan_info_disclosure",     "apply_info_disclosure"),
+        ]
+        for mut_name, plan_fn_name, apply_fn_name in _plan_apply:
+            try:
+                plan_fn = getattr(_plan_mod, plan_fn_name)
+                apply_fn = getattr(_apply_mod, apply_fn_name)
+                entry = _MUTATIONS.get(mut_name)
+                if entry is not None:
+                    entry.plan_experiment = plan_fn  # type: ignore[assignment]
+                    entry.apply_mutation = apply_fn  # type: ignore[assignment]
+            except AttributeError as exc:
+                log.error(
+                    "mutation.plan_apply_missing",
+                    mutation=mut_name,
+                    error=str(exc),
+                    exc_info=True,
+                )
 
 
 # Auto-enregistrement a l'import

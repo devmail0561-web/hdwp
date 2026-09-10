@@ -44,8 +44,33 @@ from hdwp.core.model.schemas import (
     NormalizedRequest,
 )
 from hdwp.core.observation.normalizer import normalize_response
+from hdwp.core.observation.waf_detector import detect_waf as _detect_waf_obs
 
 log = structlog.get_logger()
+
+
+def _detect_waf_from_response(
+    response: Any, url: str = "",
+) -> str | None:
+    """Détecte un WAF depuis une NormalizedResponse d'expérience."""
+    from hdwp.core.model.schemas import NormalizedRequest, NormalizedResponse, RawObservation
+    if response is None:
+        return None
+    # WAF peut se déguiser en 404/500/502 — normaliser vers 403 pour la détection
+    # header-based. Le body est effacé pour éviter les faux positifs sur pages 404 légitimes.
+    raw_status = response.status_code
+    waf_status = 403 if raw_status in (404, 500, 502) else raw_status
+    waf_body = None if waf_status != raw_status else (response.body if hasattr(response, "body") else None)
+    obs = RawObservation(
+        timestamp="", source="active", type="HTTP", session_id="",
+        request=NormalizedRequest(method="GET", url=url),
+        response=NormalizedResponse(
+            status_code=waf_status,
+            headers=response.headers if hasattr(response, "headers") else {},
+            body=waf_body,
+        ),
+    )
+    return _detect_waf_obs(obs)
 
 
 class ExperimentEngine:
@@ -184,18 +209,67 @@ class ExperimentEngine:
                 await self._bus.emit(EXPERIMENT_RESULT, baseline.model_dump(), source="experiment_engine")
                 continue
             if base_status in (404, 500, 502, 503):
-                log.debug(
-                    "experiment.baseline_invalid_skip",
-                    hypothesis_id=hyp.id,
-                    url=plan.baseline_request.url,
-                    status=base_status,
+                # Vérifier si c'est un blocage WAF déguisé en 404/5xx
+                waf_tag = _detect_waf_from_response(
+                    baseline.response_received, plan.baseline_request.url,
                 )
-                self._invalid_baselines.add(_baseline_key)
-                continue
-            if baseline_id is None:
-                baseline_id = baseline.id
-            self._results_buffer[hyp.id].append(baseline)
-            await self._bus.emit(EXPERIMENT_RESULT, baseline.model_dump(), source="experiment_engine")
+                # Croiser avec le status observé passivement : si l'observation
+                # a vu un 200 sur cet endpoint, un 404 en expérience est suspect.
+                observed_ok = False
+                if model is not None:
+                    from hdwp.core.model.url_utils import normalize_url_path
+                    norm_path = normalize_url_path(plan.baseline_request.url)
+                    for ep in model.endpoints:
+                        _ep_prefix = ep.path.split("{")[0]
+                        if not _ep_prefix.endswith("/"):
+                            _ep_prefix += "/"
+                        if ep.path == norm_path or norm_path.startswith(_ep_prefix):
+                            if any(s < 400 for s in ep.status_by_role.values()):
+                                observed_ok = True
+                            if not waf_tag and ep.detected_waf:
+                                waf_tag = ep.detected_waf
+                            elif waf_tag and not ep.detected_waf:
+                                ep.detected_waf = waf_tag
+                                # Propager dans tech_stack pour le pipeline bypass
+                                try:
+                                    model.tech_stack.add(waf_tag)
+                                except AttributeError:
+                                    if waf_tag not in model.tech_stack:
+                                        model.tech_stack.append(waf_tag)
+                            break
+
+                if waf_tag or observed_ok:
+                    log.warning(
+                        "experiment.baseline_waf_blocked",
+                        hypothesis_id=hyp.id,
+                        url=plan.baseline_request.url,
+                        status=base_status,
+                        waf=waf_tag or "suspected",
+                        observed_ok=observed_ok,
+                    )
+                    # Ne PAS blacklister : l'endpoint est vivant mais protégé.
+                    # Utiliser le 404 WAF comme baseline de référence et exécuter
+                    # la mutation quand même — si le bypass réussit, le diff
+                    # 404→200 sera détecté par l'oracle.
+                    if baseline_id is None:
+                        baseline_id = baseline.id
+                    self._results_buffer[hyp.id].append(baseline)
+                    await self._bus.emit(EXPERIMENT_RESULT, baseline.model_dump(), source="experiment_engine")
+                    # Laisser le flux continuer vers la mutation (pas de continue).
+                else:
+                    log.debug(
+                        "experiment.baseline_invalid_skip",
+                        hypothesis_id=hyp.id,
+                        url=plan.baseline_request.url,
+                        status=base_status,
+                    )
+                    self._invalid_baselines.add(_baseline_key)
+                    continue
+            else:
+                if baseline_id is None:
+                    baseline_id = baseline.id
+                self._results_buffer[hyp.id].append(baseline)
+                await self._bus.emit(EXPERIMENT_RESULT, baseline.model_dump(), source="experiment_engine")
 
             # ── race condition experiments (via TemporalModule) ───────────────
             if plan.mutation_type == "race_condition":

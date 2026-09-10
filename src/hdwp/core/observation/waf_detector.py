@@ -88,23 +88,26 @@ def detect_waf(obs: RawObservation) -> str | None:
     headers = {k.lower(): v.lower() for k, v in (obs.response.headers or {}).items()}
     body_str = str(obs.response.body or "").lower()
 
-    # Ne pas tenter la détection si le body est trop court (bare 403)
-    if len(body_str) < _BARE_403_MIN_BODY and "waf:generic" not in _WAF_SIGNATURES:
+    # ── Détection header-based (indépendante de la longueur du body) ──────────
+    for waf_tag, patterns in _WAF_SIGNATURES.items():
+        if waf_tag == "waf:generic":
+            continue
+        for source, pattern in patterns:
+            if source == "header_name" and any(pattern.search(k) for k in headers):
+                return waf_tag
+            elif source == "header_value" and any(pattern.search(v) for v in headers.values()):
+                return waf_tag
+
+    # ── Détection body-based : ignorer les blocs nus sans page WAF ───────────
+    if len(body_str) < _BARE_403_MIN_BODY:
         return None
 
     for waf_tag, patterns in _WAF_SIGNATURES.items():
         if waf_tag == "waf:generic":
-            continue  # tester le générique en dernier
+            continue
         for source, pattern in patterns:
-            if source == "header_name":
-                if any(pattern.search(k) for k in headers):
-                    return waf_tag
-            elif source == "header_value":
-                if any(pattern.search(v) for v in headers.values()):
-                    return waf_tag
-            elif source == "body":
-                if pattern.search(body_str):
-                    return waf_tag
+            if source == "body" and pattern.search(body_str):
+                return waf_tag
 
     # Générique en dernier recours
     for source, pattern in _WAF_SIGNATURES.get("waf:generic", []):

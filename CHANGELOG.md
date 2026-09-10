@@ -6,6 +6,130 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
+## [4.1.0-dev] — 2026-09-10 — Système d'exploitation 100% data-driven
+
+### Identifié — 2026-09-10
+
+**Problème** : statut `PARTIEL` systématique sur les findings passifs (CWE-1004, `missing:CSP`) dans l'onglet EXPLOIT.
+Cause : handlers `contextual` dans `passive.yaml` dépendent d'un CWE-79 croisé — renvoient toujours `partial` sans XSS confirmé.
+Fix planifié dans `TODO_exploit_partial.md` :
+- Remplacer `contextual` par `network` pour `cookie:missing-httponly` et `missing:CSP` (vérification header live)
+- Filtrer `/api/payload/findings` pour exclure les findings sans exploit exécutable
+
+---
+
+## [4.1.0-dev] — 2026-09-09 — Système d'exploitation 100% data-driven
+
+### Phase 0 — Infrastructure data-driven
+
+**Ajoutés**
+- `PayloadDatabase` singleton (`store/payload_database.py`) : chargement payloads depuis YAML, frozen dataclasses thread-safe, fallback legacy automatique
+- 14 fichiers YAML payloads sous `core/payloads/` (SQLi, XSS, SSTI, XXE, LDAP, CMDi, path traversal, NoSQLi, CRLF, deserialization, GraphQL, etc.)
+- `TuningConfig` étendu : 11 poids V2 externalisés + `confirmed_threshold_used` sur Finding
+- Synchronisation `FeedbackLoop` avec `TuningConfig` (suppression copie séparée `V2_DEFAULT_WEIGHTS`)
+
+**Corrigés**
+- 6 hotfixes intégration PayloadDatabase (encodeur double, singleton reset, imports circulaires)
+
+### Phase 1 — Encoding, Obfuscation & Payloads avancés
+
+**Ajoutés**
+- `encoder_registry.py` + `encoding_pipeline.py` (`core/experiment/`) : encodeurs chaînés (URL, Unicode, Base64, null bytes, HTML entities, etc.)
+- 10 fichiers YAML payloads complets avec variantes par tech stack
+- Chaînes adaptatives `ADAPTIVE_CHAINS` pour SQLi/XSS : escalade automatique selon la détection (error-based → union → stacked → time-based)
+- Mutations custom SSTI/Deserialization/GraphQL dans `mutation_module.py`
+
+**Corrigés**
+- 4 bugs (ExploitAction build, engine UnboundLocalError, DEFAULT_BIAS alias, singleton reset)
+
+### Phase 2 — WAF Bypass
+
+**Ajoutés**
+- `BypassRegistry` (`core/payloads/waf_bypass/bypass_registry.py`) : registre de stratégies de contournement WAF
+- `waf_signatures.yaml` : 7 signatures WAF reconnues (Cloudflare, AWS WAF, ModSecurity, F5 BIG-IP, Akamai, Imperva, Barracuda)
+- 15 stratégies bypass transport/protocol (chunked encoding, header case, HTTP/1.0, etc.)
+- 127 tests unitaires : `test_bypass_registry.py` (27), `test_waf_signatures_yaml.py` (10), `test_mutation_module_transport_bypass.py` (14), + intégration MutationModule
+
+**Corrigés**
+- 6 corrections audit (registry stale après ajout dynamique, fan-out sur multi-payload, hpp encoding, body=None crash)
+
+### Phase 3 — Couverture plugins complète
+
+**Ajoutés**
+- 26 nouvelles stratégies d'exploitation YAML (1 à 3 par plugin non couvert)
+- 14 nouveaux mutation types enregistrés dans `mutation_registry.py`
+- 100% des 40 plugins couverts par au moins une stratégie d'exploitation
+
+### Phase 4 — Scale OWASP (1000 stratégies)
+
+**Ajoutés**
+- 1000 stratégies YAML générées : 100 par catégorie OWASP (A01 Access Control → A10 SSRF)
+- 10 répertoires : `a01_access_control/` à `a10_ssrf/` sous `core/exploit/strategies/`
+- Total : **1040 fichiers YAML** de stratégies d'exploitation
+- `strategy_registry.py` : chargement dynamique de toutes les stratégies YAML au démarrage
+
+### Audit correctness post-implémentation
+
+**Corrigés**
+- 10 bugs détectés par audit max-level (success type dispatch, output capture, template resolution, etc.)
+- 2 bugs résiduels followup (pipeline edge cases)
+
+### Architecture d'exploitation — refonte moteur réseau
+
+**Ajoutés**
+- `_execute_network_phases()` refondu : 15+ inject types (`param_from_winning_request`, `header`, `url_transform`, `path_param`, `url_id_replace`, `winning_request_replay`, `winning_request_mutation`, `body_merge`, `get_verification`, `jwt_header`, `jwt_resign_hs256`, `jwt_payload_modify`, `none`)
+- 10+ success types (`status_2xx`, `status_not_5xx`, `status_code`, `status_not_redirect`, `body_contains`, `body_contains_any`, `header_present`, `header_reflects_payload`, `header_equals`, `regex`)
+- Captures spécialisées : `extract_sensitive`, `set_cookie_headers`
+- Gestion fallback URL (winning_request → affected_endpoints → session.target_url)
+- Messages d'erreur enrichis (HTTP status code + exception type dans les résultats `failed`)
+- Dispatch passif : résultat `partial` au lieu de `failed` pour findings confirmés par scan passif
+
+### Nouvelles mutations
+
+**Ajoutés**
+- `apply_cache_poisoning` / `plan_cache_poisoning` : injection X-Forwarded-Host, X-Original-URL, X-Rewrite-URL
+- `apply_http_smuggling` / `plan_http_smuggling` : probe CL.TE (Content-Length + Transfer-Encoding conflictuels)
+- `apply_info_disclosure` / `plan_info_disclosure` : injection de caractères d'erreur pour provoquer stack traces
+- Enregistrement dans `_register_builtins()` du `mutation_registry.py`
+- Tag `stack_trace` dans `passive_engine.py` pour info disclosure
+- ExploitAction CWE-1275 : PoC CSRF pour cookie sans SameSite (page HTML démo cross-origin)
+
+### Corrections passive.yaml
+
+**Corrigés**
+- Output keys manquants sur phases `http_cleartext` et `http_accessible`
+- Success type `status_2xx` → `status_not_5xx` sur phase cleartext (plus réaliste)
+- Handler `stack_trace` ajouté (proof_type: contextual, cross_reference_cwe: CWE-79)
+
+### Stats
+
+- 18 commits, ~32 000 lignes ajoutées, 1140 fichiers modifiés
+- 1256 tests, 254 fichiers source Python, 1040 stratégies YAML
+
+---
+
+## [4.0.0] — 2026-09-08 — V4 : ML Intelligence Stack — 11 sprints
+
+### Vue d'ensemble
+
+Stack ML complet posé en 11 sprints itératifs : embeddings sémantiques, knowledge base SQL, ConfidenceModelV2 (10 dimensions logistiques), MetaLearner (façade ML unifiée), ExplainabilityLayer (transparence verdict).
+
+**Ajoutés**
+- Sprint 1 : 3 embedders sémantiques, tables KnowledgeBase SQL, ConfidenceModelV2 câblé
+- Sprint 2–9 : itérations ML (feature engineering, feedback loop, calibration, drift detection)
+- Sprint 10 : `MetaLearner` façade ML unifiée, `engine.py` allégé de 250 lignes
+- Sprint 11 : `ExplainabilityLayer` — `FindingExplanation`, `SignalContribution`, section "Analyse de confiance" dans rapports Markdown/JSON
+
+**Corrigés**
+- Audit complet v4 : stabilité moteur, exploits réels, proxy fallback
+- Cache baselines invalides (url, method, role) : évite requêtes redondantes sur endpoints 404/500
+
+### Stats
+
+- 1112 tests à la sortie de v4.0.0
+
+---
+
 ## [3.0.0] — 2026-09-07 — V3 : Reasoning Engine, UI Intel, bugfixes proxy
 
 ### V3 Sprint 1 — Reasoning Foundation
@@ -255,10 +379,6 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
-## [Unreleased]
-
----
-
 ## [0.5.0] — 2026-09-01
 
 ### Multi-LLM Provider
@@ -412,13 +532,6 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
-### A venir
-- ReportEngine : Markdown, JSON, HAR
-- CLI `hdwp report`, `hdwp replay` complètes
-- LLM minimaliste (disambiguate_diff)
-
----
-
 ## [0.2.0] — 2026-09-01
 
 ### Phase 4 — Expériences & Oracle (MVP fonctionnel)
@@ -464,15 +577,6 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 **Tests**
 - 274 tests, `ruff check src/` : 0 erreurs
-
----
-
-### A venir
-- `ExperimentEngine` : exécution des mutations HTTP
-- `MutationModule` : identity_swap, object_ref_change, privilege_escalation
-- `SemanticOracle` : orchestration diff + confiance + statut
-- `hdwp run` fonctionnel (pipeline complet)
-- Test d'intégration end-to-end sur mock server
 
 ---
 
@@ -539,5 +643,17 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
-[Unreleased]: https://github.com/mtendeng/hdwp/compare/v0.1.0...HEAD
+[4.1.0-dev]: https://github.com/mtendeng/hdwp/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/mtendeng/hdwp/compare/v3.0.0...v4.0.0
+[3.0.0]: https://github.com/mtendeng/hdwp/compare/v2.1.0...v3.0.0
+[2.1.0]: https://github.com/mtendeng/hdwp/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/mtendeng/hdwp/compare/v1.0.0...v2.0.0
+[1.0.0]: https://github.com/mtendeng/hdwp/compare/v0.6.0...v1.0.0
+[0.6.0]: https://github.com/mtendeng/hdwp/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/mtendeng/hdwp/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/mtendeng/hdwp/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/mtendeng/hdwp/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/mtendeng/hdwp/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/mtendeng/hdwp/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/mtendeng/hdwp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mtendeng/hdwp/releases/tag/v0.1.0

@@ -58,6 +58,7 @@ def create_app() -> FastAPI:
     from hdwp.server.routes.models import router as models_router
     from hdwp.server.routes.payload import router as payload_router
     from hdwp.server.routes.plugins import router as plugins_router
+    from hdwp.server.routes.strategies import router as strategies_router
     from hdwp.server.routes.proxy import router as proxy_router
     from hdwp.server.routes.report import router as report_router
     from hdwp.server.routes.scan import router as scan_router
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(state_router, prefix="/api")
     app.include_router(findings_router, prefix="/api")
     app.include_router(plugins_router, prefix="/api")
+    app.include_router(strategies_router, prefix="/api")
     app.include_router(proxy_router, prefix="/api")
     app.include_router(report_router, prefix="/api")
     app.include_router(payload_router, prefix="/api")

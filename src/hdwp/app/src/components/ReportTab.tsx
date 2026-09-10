@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLLMStore } from '../stores/llmStore'
 
 type Format = 'markdown' | 'json' | 'har'
@@ -23,13 +23,22 @@ export function ReportTab() {
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<{ path: string; ai_included: boolean } | null>(null)
   const [error, setError] = useState('')
+  const [outputDir, setOutputDir] = useState('')
+  const [defaultDir, setDefaultDir] = useState('')
+
+  useEffect(() => {
+    fetch('/api/report/default-dir')
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { path: string } | null) => { if (d) setDefaultDir(d.path) })
+      .catch(() => {})
+  }, [])
 
   const handleGenerate = async () => {
     setGenerating(true); setResult(null); setError('')
     try {
       const r = await fetch('/api/report/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format, include_ai_summary: aiSummary && llmActive }),
+        body: JSON.stringify({ format, include_ai_summary: aiSummary && llmActive, output_dir: outputDir || null }),
       })
       if (!r.ok) {
         setError(await r.text())
@@ -97,6 +106,31 @@ export function ReportTab() {
             </div>
           </>
         )}
+
+        {sectionLabel('RÉPERTOIRE DE SORTIE')}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="text"
+            value={outputDir}
+            onChange={e => setOutputDir(e.target.value)}
+            placeholder={defaultDir || '~/.hdwp/workspaces/.../reports/'}
+            style={{
+              flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-hi)',
+              color: 'var(--green)', fontFamily: 'var(--font-mono)', fontSize: 10,
+              padding: '5px 8px',
+            }}
+          />
+          <button
+            onClick={() => setOutputDir('')}
+            style={{
+              padding: '5px 10px', fontFamily: 'var(--font-title)', fontSize: 9,
+              letterSpacing: 1, background: 'transparent', border: '1px solid var(--border-hi)',
+              color: 'var(--green-dark)', cursor: 'pointer', flexShrink: 0,
+            }}
+          >
+            [ DÉFAUT ]
+          </button>
+        </div>
 
         {error && <div style={{ color: 'var(--red)', fontSize: 10, marginTop: 12 }}>{error}</div>}
 

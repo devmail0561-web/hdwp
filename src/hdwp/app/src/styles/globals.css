@@ -19,6 +19,11 @@
   --border-hi:  #00ff4455;
   --font-title: 'Orbitron', monospace;
   --font-mono:  'Share Tech Mono', monospace;
+  --fs-xs:      9px;
+  --fs-sm:      10px;
+  --fs-base:    11px;
+  --fs-md:      12px;
+  --fs-lg:      13px;
 }
 
 html, body, #root {

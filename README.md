@@ -22,18 +22,31 @@ Les classifications OWASP/CWE sont appliquées *a posteriori* sur les findings �
 
 ## Features
 
-- **37 vecteurs de détection** — plugins sémantiques couvrant OWASP Web Top 10, OWASP API Security Top 10, et CWEs web critiques
-- **Détection d'anomalies inconnues** — Z-score comportemental, ratio de taille de réponse, entropie des champs (tokens/clés) — détecte sans signature
-- **Mutations comportementales** — type confusion (CWE-843), boundary values (CWE-190), parameter pollution (CWE-915)
+### Détection
+- **40 plugins sémantiques** — OWASP Web Top 10, OWASP API Security Top 10, CWEs web critiques
+- **Détection d'anomalies inconnues** — Z-score comportemental, ratio de taille, entropie des champs — détecte sans signature
+- **36 types de mutation** — identity_swap, field_injection, type_confusion, cache_poisoning, http_smuggling, info_disclosure, etc.
 - **Boucle de feedback** — findings confirmés → nouvelles hypothèses d'approfondissement automatiques
 - **Couverture multi-méthodes** — sonde POST/PUT/PATCH sur chaque endpoint GET découvert
-- **Oracle comportemental** — compare baseline vs mutation avec `data_identity_score` (pas seulement les patterns)
-- **Threat scoring** — `ThreatModelEngine` calcule un score de menace dynamique par endpoint (AssetRegistry + AttackSurfaceScorer)
-- **Invariant learning** — `InvariantStore` apprend inductivement les invariants d'endpoint et détecte les violations
-- **CrossRole diff** — `CrossRoleDiffEngine` compare les réponses inter-rôles (STRUCTURAL/VALUE/IDENTITY)
-- **Temporal anomaly** — `TemporalAnomalyDetector` détecte l'injection blind via timing (baseline p95 + escalade)
-- **Adaptive WAF bypass** — `AdaptivePayloadEngine` classe les signaux d'expérience et sélectionne les stratégies de bypass WAF
-- **Attack graph** — `AttackGraphPlanner` planifie des chaînes d'attaque multi-étapes via A* sur `AttackState`
+
+### Exploitation data-driven
+- **1040 stratégies d'exploitation YAML** — 100 par catégorie OWASP (A01–A10), extensibles sans code
+- **PayloadDatabase** — payloads externalisés en YAML (14 fichiers), fallback legacy automatique
+- **Encoding pipeline** — encodeurs chaînés (URL, Unicode, Base64, null bytes, etc.)
+- **WAF bypass** — `BypassRegistry` avec 15 stratégies transport/protocol, 7 signatures WAF reconnues
+- **Chaînes adaptatives** — SQLi/XSS ADAPTIVE_CHAINS : escalade automatique selon détection
+
+### Intelligence
+- **ML confidence model** — ConfidenceModelV2 (10 dimensions logistiques), ExplainabilityLayer (transparence verdict)
+- **MetaLearner** — façade ML unifiée, apprentissage inter-sessions via KnowledgeBase
+- **Oracle comportemental** — compare baseline vs mutation avec `data_identity_score`
+- **Threat scoring** — `ThreatModelEngine` score de menace dynamique par endpoint
+- **Invariant learning** — `InvariantStore` apprend inductivement les invariants et détecte les violations
+- **CrossRole diff** — compare les réponses inter-rôles (STRUCTURAL/VALUE/IDENTITY)
+- **Temporal anomaly** — détection d'injection blind via timing (baseline p95 + escalade)
+- **Attack graph** — `AttackGraphPlanner` planifie des chaînes multi-étapes via A* sur `AttackState`
+
+### Infrastructure
 - **Onglet INTEL** — tableau de bord temps réel des signaux v3 dans l'interface web
 - **Tor opt-in** — connexion directe par défaut ; Tor activé via `tor_proxy` dans le contexte ou `--proxy` CLI
 - **SPA support** — crawl Playwright routé à travers le proxy MITM
@@ -92,15 +105,19 @@ OBSERVE     → crawl GET + probe POST/PUT/PATCH + proxy MITM + OpenAPI seed
 MODEL       → EndpointNode, ParameterNode (semantic), DataObjectNode (sensitivity)
               + ThreatModelEngine (score/classification par endpoint)
               + InvariantStore (apprentissage inductif des invariants)
-INFER       → SecurityProperty depuis le graphe sémantique (34 modules)
+INFER       → SecurityProperty depuis le graphe sémantique (40 plugins)
 HYPOTHESIZE → ContextualHypothesisEngine (profondeur SHALLOW/MEDIUM/DEEP selon threat score)
-EXPERIMENT  → baseline + mutation (méthode réelle du corpus)
+EXPERIMENT  → baseline + mutation (36 types, payloads YAML, encoding pipeline)
               + AdaptivePayloadEngine (WAF detection + bypass strategy)
+              + BypassRegistry (15 stratégies transport/protocol)
 ORACLE      → SemanticDiff + data_identity_score + anomaly detection (Z-score, size ratio, entropy)
               + CrossRoleDiffEngine (STRUCTURAL/VALUE/IDENTITY)
               + TemporalAnomalyDetector (blind injection via timing)
+              + ConfidenceModelV2 (10 dimensions) + ExplainabilityLayer
+EXPLOIT     → 1040 stratégies YAML (A01–A10) + moteur réseau multi-phases
+              + 15+ inject types + PoC HTML auto-générés
 CHAIN       → AttackGraphPlanner (A* multi-étapes sur AttackState) + corrélations multi-findings
-REPORT      → Findings avec impact, scénarios d'attaque, remédiations
+REPORT      → Findings avec impact, scénarios d'attaque, remédiations, explainability
 ```
 
 ## License

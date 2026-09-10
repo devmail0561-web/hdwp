@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -16,6 +17,16 @@ router = APIRouter()
 class ReportRequest(BaseModel):
     format: Literal["markdown", "json", "har"] = "json"
     include_ai_summary: bool = False
+    output_dir: str | None = None
+
+
+@router.get("/report/default-dir")
+async def get_default_report_dir(request: Request) -> dict:
+    """Retourne le répertoire de rapport par défaut pour la session active."""
+    session = request.app.state.server_state.get_active()
+    if session:
+        return {"path": str(reports_dir(session.session_id))}
+    return {"path": str(Path.home() / ".hdwp" / "reports")}
 
 
 @router.post("/report/generate")
@@ -36,7 +47,11 @@ async def generate_report(req: ReportRequest, request: Request) -> dict:
         report_engine = ReportEngine(AsyncEventBus(), session.repository)
         llm_layer = None
 
-    out_dir = reports_dir(session.session_id)
+    if req.output_dir:
+        out_dir = Path(req.output_dir).expanduser().resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = reports_dir(session.session_id)
 
     try:
         if req.format == "json":

@@ -90,15 +90,6 @@ hdwp = "hdwp.cli.main:app"
 "core.injection.django_debug" = "hdwp.plugins.core.injection.django_debug:DjangoDebugPlugin"
 "core.authorization.laravel_mass_assign" = "hdwp.plugins.core.authorization.laravel_mass_assign:LaravelMassAssignPlugin"
 
-[project.entry-points."hdwp.inference"]
-authorization   = "hdwp.core.property_engine.inference.authorization:AuthorizationInference"
-confidentiality = "hdwp.core.property_engine.inference.confidentiality:ConfidentialityInference"
-state           = "hdwp.core.property_engine.inference.state:StateInference"
-integrity       = "hdwp.core.property_engine.inference.integrity:IntegrityInference"
-coherence       = "hdwp.core.property_engine.inference.coherence:CoherenceInference"
-temporal        = "hdwp.core.property_engine.inference.temporal:TemporalInference"
-concurrency     = "hdwp.core.property_engine.inference.concurrency:ConcurrencyInference"
-
 [project.entry-points."hdwp.mutations"]
 identity_swap        = "hdwp.core.experiment.request_selector:plan_identity_swap"
 object_ref_change    = "hdwp.core.experiment.request_selector:plan_object_ref_change"

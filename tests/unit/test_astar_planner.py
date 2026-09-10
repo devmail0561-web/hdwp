@@ -205,7 +205,7 @@ async def test_discover_chains_returns_plan_summaries() -> None:
     plans = await planner.discover_chains()
     assert len(plans) >= 1
     plan = plans[0]
-    assert plan["goal_type"] == "DATA_EXFILTRATION"
+    assert plan["chain_type"] == "DATA_EXFILTRATION"
     assert plan["steps"] == 1
-    assert "finding_ids" in plan
-    assert plan["finding_ids"] == ["F-001"]
+    assert "precondition_finding_ids" in plan
+    assert plan["precondition_finding_ids"] == ["F-001"]
