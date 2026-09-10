@@ -25,6 +25,17 @@ docs/HDWP_v3_Architecture.md
 docs/hdwp_tui_dashboard.html
 docs/pentest_tui_dashboard.html
 AUDIT_*.md
+PLAN_*.md
+TODO_*.md
+archive/
+_hdwp
+prompt
+alembic.ini
+hatch_build.py
+hdwp-context.example.yaml
+hdwp.spec
+hdwp_entry.py
+pyproject.toml
 error.txt
 mon-pentest.yaml
 *-pentest.yaml
