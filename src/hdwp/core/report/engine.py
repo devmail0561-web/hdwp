@@ -2,13 +2,14 @@
 # Licensed under the MIT License. See LICENSE file for details.
 
 """
-ReportEngine: agrège les findings et génère les exports (Markdown, JSON, HAR).
+ReportEngine: agrège les findings et génère les exports (Markdown, JSON, HAR, SARIF).
 
 Abonnement : finding.confirmed → accumule les findings en mémoire.
 API publique :
   generate_markdown(output_path) → rapport lisible par sévérité
   generate_json(output_dir)      → findings.json + summary.json
   generate_har(output_dir)       → un .har par finding
+  generate_sarif(output_dir)     → findings.sarif (SARIF 2.1.0)
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from hdwp.core.model.schemas import Finding
 from hdwp.core.report.har_exporter import build_har
 from hdwp.core.report.json_export import compute_summary
 from hdwp.core.report.markdown import render_markdown
+from hdwp.core.report.sarif_export import build_sarif
 
 if TYPE_CHECKING:
     from hdwp.core.llm.layer import LLMLayerProtocol
@@ -99,6 +101,18 @@ class ReportEngine:
                 encoding="utf-8",
             )
         log.info("report.har_generated", dir=str(output_dir), count=len(findings))
+
+    async def generate_sarif(self, output_dir: Path, tool_version: str = "unknown") -> Path:
+        findings = await self._get_findings()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sarif_data = build_sarif(findings, tool_version=tool_version)
+        sarif_path = output_dir / "findings.sarif"
+        sarif_path.write_text(
+            json.dumps(sarif_data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        log.info("report.sarif_generated", path=str(sarif_path), findings=len(findings))
+        return sarif_path
 
     @property
     def findings(self) -> list[Finding]:

@@ -81,6 +81,10 @@ def run(
         bool,
         typer.Option("--no-tui", hidden=True, help="Run without TUI (CI/debug mode)"),
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Observer la cible et lister les hypothèses sans exécuter d'expériences"),
+    ] = False,
 ) -> None:
     """Lancer le moteur HDWP (TUI interactif).
 
@@ -91,6 +95,9 @@ def run(
     """
     if target and not context:
         context = _create_minimal_context(target)
+
+    if dry_run:
+        no_tui = True  # dry-run est toujours headless
 
     if no_tui:
         if context is None:
@@ -104,8 +111,33 @@ def run(
         )
 
         async def _run_headless() -> None:
-            async with await HDWPEngine.create(context, db_url=db_url) as engine:
+            from hdwp.core.context.loader import ContextLoader
+            ctx = ContextLoader.load(context)
+            if dry_run:
+                ctx.config.options.dry_run = True
+            from hdwp.core.bus.event_bus import AsyncEventBus
+            async with await HDWPEngine.create_from_context(
+                ctx, AsyncEventBus(), db_url=db_url,
+            ) as engine:
                 findings = await engine.run()
+
+            if dry_run and engine.dry_run_result:
+                plan = engine.dry_run_result
+                console.print(
+                    f"\n[bold cyan]Dry-run — {plan['hypotheses_count']} hypothèse(s)[/bold cyan]"
+                    " (aucune requête offensive envoyée)"
+                )
+                for h in plan["hypotheses"]:
+                    console.print(f"  [{h['priority']}] {h['id']} — {h['statement'][:80]}")
+                    for ep in h["affected_endpoints"][:2]:
+                        console.print(f"    endpoint: {ep}")
+                    if h["planned_mutations"]:
+                        console.print(f"    mutations: {', '.join(h['planned_mutations'])}")
+                console.print(
+                    f"\n[dim]Relancer sans --dry-run pour exécuter les {plan['hypotheses_count']} expériences.[/dim]"
+                )
+                return
+
             if not findings:
                 console.print("[green]Aucun finding confirme.[/green]")
                 return
@@ -115,9 +147,7 @@ def run(
             table.add_column("OWASP")
             table.add_column("Conf.")
             for f in findings:
-                table.add_row(
-                    f.id, f.severity, f.owasp_category, f"{f.confidence:.0%}"
-                )
+                table.add_row(f.id, f.severity, f.owasp_category, f"{f.confidence:.0%}")
             console.print(table)
 
         asyncio.run(_run_headless())

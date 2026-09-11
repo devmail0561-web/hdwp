@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: pip install -e ".[dev]" --quiet
+      - name: Strategy dedup check
+        run: python tools/check_strategy_dupes.py
+      - name: Tests
+        run: pytest tests/ -x -q
+
+  lint:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install ruff --quiet
+      - run: ruff check src/ --select E,F,W --ignore E501
+
+  security-audit:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install audit tools
+        run: pip install bandit pip-audit --quiet
+      - name: bandit — static security analysis
+        run: bandit -r src/ -ll -q
+      - name: pip-audit — dependency CVEs
+        run: pip install -e "." --quiet && pip-audit

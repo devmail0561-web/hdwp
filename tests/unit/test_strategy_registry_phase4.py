@@ -1,7 +1,8 @@
 # Copyright (c) 2026 M. TENDENG
 # Licensed under the MIT License. See LICENSE file for details.
 """
-Phase 4 — StrategyRegistry: 1040 stratégies chargées (1000 générées + 40 existantes).
+Phase 4 — StrategyRegistry: 376 stratégies catégorisées + 40 root = ~416 uniques.
+Dédupliqué: anciens clones supprimés, seules les techniques distinctes sont conservées.
 Vérifie structure, couverture OWASP, et unicité des IDs.
 """
 from pathlib import Path
@@ -24,8 +25,8 @@ OWASP_SUBDIRS = [
     "a10_ssrf",
 ]
 
-EXPECTED_MIN_TOTAL = 1000
-EXPECTED_MIN_PER_CATEGORY = 90  # allow small variance
+EXPECTED_MIN_TOTAL = 400  # 416 unique strategies post-dedup (was 1040 with clones)
+EXPECTED_MIN_PER_CATEGORY = 8   # smallest category post-dedup (a08_integrity: 9)
 
 
 class TestPhase4StrategyFiles:

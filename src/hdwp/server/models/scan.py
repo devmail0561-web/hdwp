@@ -7,3 +7,7 @@ from pydantic import BaseModel
 class ScanStatusResponse(BaseModel):
     status: str
     session_id: str
+
+
+class ScanStartRequest(BaseModel):
+    dry_run: bool = False

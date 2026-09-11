@@ -1,0 +1,48 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"  # nightly at 02:00 UTC
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+
+    services:
+      dvwa:
+        image: vulnerables/web-dvwa
+        ports:
+          - 8080:80
+      juiceshop:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -e ".[dev]" --quiet
+
+      - name: Wait for DVWA
+        run: timeout 90 bash -c 'until curl -sf http://localhost:8080/login.php; do sleep 3; done'
+
+      - name: Initialize DVWA database
+        run: |
+          curl -s -c /tmp/dvwa.txt http://localhost:8080/setup.php \
+            --data "create_db=Create+%2F+Reset+Database" > /dev/null
+
+      - name: Wait for JuiceShop
+        run: timeout 90 bash -c 'until curl -sf http://localhost:3000; do sleep 3; done'
+
+      - name: Run integration tests
+        env:
+          HDWP_INTEGRATION_TARGETS: "1"
+          DVWA_URL: "http://localhost:8080"
+          JUICESHOP_URL: "http://localhost:3000"
+        run: pytest tests/integration/ -m integration -v --tb=short

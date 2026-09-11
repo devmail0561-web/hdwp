@@ -80,6 +80,19 @@ class OAuth2Client:
         async with build_client(timeout=15.0) as client:
             try:
                 resp = await client.post(cred.token_endpoint, data=data)
+                # MFA/2FA challenge — complete OTP step if totp_secret is configured
+                if cred.totp_secret:
+                    from hdwp.core.experiment.mfa_handler import (
+                        detect_mfa_challenge,
+                        resolve_mfa_step,
+                    )
+                    challenge = detect_mfa_challenge(resp)
+                    if challenge:
+                        mfa_resp = await resolve_mfa_step(
+                            client, challenge, cred.totp_secret, resp
+                        )
+                        if mfa_resp is not None and mfa_resp.status_code < 400:
+                            resp = mfa_resp
                 resp.raise_for_status()
                 token_data: dict[str, Any] = resp.json()
             except Exception as exc:

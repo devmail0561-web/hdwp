@@ -51,6 +51,7 @@ class CredentialConfig(BaseModel):
     client_secret: str | None = None    # ex: ${CLIENT_SECRET}
     scope: str | None = None            # ex: "read write admin"
     refresh_token: str | None = None    # stocké automatiquement si retourné
+    totp_secret: str | None = None      # secret base32 pour TOTP (2FA/MFA)
 
 
 class RoleConfig(BaseModel):
@@ -82,6 +83,10 @@ class OptionsConfig(BaseModel):
     scan_time_limit_minutes: int = 60  # durée max du mode continu (0 = illimité)
     # Chemin vers un fichier JSON de signatures CVE pour les missions en réseau isolé.
     offline_cve_db: str | None = None
+    # Mode dry-run : effectue l'observation et génère les hypothèses mais n'exécute
+    # aucune expérience. Retourne le plan (hypothèses + mutations prévues) sans
+    # envoyer de requêtes offensives vers la cible.
+    dry_run: bool = False
 
 
 class PluginConfig(BaseModel):

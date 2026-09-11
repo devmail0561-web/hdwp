@@ -147,6 +147,7 @@ class HDWPEngine:
         self._adaptive_payload_engine: Any | None = None
         self._threat_engine: Any | None = None
         self._invariant_store: Any | None = None
+        self.dry_run_result: dict | None = None
 
         from hdwp.core.attack_graph.planner import AttackGraphPlanner
         self._chain_engine = AttackGraphPlanner(
@@ -447,6 +448,43 @@ class HDWPEngine:
         Le bus est celui du proxy, partage avec le moteur."""
         return await cls._init_components(context, bus, db_url, plugin_ids, proxy_url=proxy_url)
 
+    def _build_dry_run_report(self, hypotheses: list[Any]) -> dict:
+        """Construit le rapport dry-run : liste des hypothèses et mutations planifiées."""
+        priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+        sorted_hyps = sorted(
+            hypotheses,
+            key=lambda h: priority_order.get(h.priority, 99),
+        )
+        hyp_entries = []
+        for h in sorted_hyps:
+            endpoints = sorted({
+                spec.base_request.url
+                for spec in h.required_experiments
+                if hasattr(spec, "base_request")
+            })
+            mutations = sorted({
+                spec.mutation_type
+                for spec in h.required_experiments
+                if hasattr(spec, "mutation_type")
+            })
+            hyp_entries.append({
+                "id": h.id,
+                "property_id": h.property_id,
+                "priority": h.priority,
+                "statement": h.statement,
+                "source_plugin": h.source_plugin,
+                "affected_endpoints": endpoints,
+                "planned_mutations": mutations,
+                "experiments_count": len(h.required_experiments),
+            })
+        return {
+            "dry_run": True,
+            "target": self._context.base_url,
+            "hypotheses_count": len(hypotheses),
+            "hypotheses": hyp_entries,
+            "no_requests_sent": True,
+        }
+
     async def run(self) -> list[Finding]:
         """Lance le pipeline complet et retourne les findings confirmes."""
         log.info(
@@ -519,6 +557,11 @@ class HDWPEngine:
         if _ml is not None:
             pending_v1 = _ml.sort_hypotheses(pending_v1, self._app_model.snapshot())
         log.info("engine.experiments_v1", count=len(pending_v1))
+
+        if self._context.config.options.dry_run:
+            self.dry_run_result = self._build_dry_run_report(pending_v1)
+            log.info("engine.dry_run_complete", hypotheses=len(pending_v1))
+            return []
 
         if pending_v1:
             await self._exp_engine.run_pending(pending_v1)

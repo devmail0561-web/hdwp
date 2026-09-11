@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from hdwp.core.paths import reports_dir
@@ -15,7 +16,7 @@ router = APIRouter()
 
 
 class ReportRequest(BaseModel):
-    format: Literal["markdown", "json", "har"] = "json"
+    format: Literal["markdown", "json", "har", "sarif"] = "json"
     include_ai_summary: bool = False
     output_dir: str | None = None
 
@@ -60,6 +61,9 @@ async def generate_report(req: ReportRequest, request: Request) -> dict:
         elif req.format == "har":
             await report_engine.generate_har(out_dir)
             output_path = str(out_dir / "har/")
+        elif req.format == "sarif":
+            sarif_path = await report_engine.generate_sarif(out_dir)
+            output_path = str(sarif_path)
         else:  # markdown
             md_path = out_dir / "report.md"
             await report_engine.generate_markdown(
@@ -77,3 +81,30 @@ async def generate_report(req: ReportRequest, request: Request) -> dict:
         "format": req.format,
         "ai_summary_included": bool(llm_layer),
     }
+
+
+@router.get("/report/sarif")
+async def get_sarif_report(request: Request) -> JSONResponse:
+    """Génère et retourne le rapport SARIF 2.1.0 de la session active."""
+    session = request.app.state.server_state.get_active()
+    if not session:
+        raise HTTPException(404, "Aucune session active")
+    if not session.repository:
+        raise HTTPException(400, "Repository non disponible pour cette session")
+
+    if session.engine:
+        report_engine = session.engine.report_engine
+    else:
+        from hdwp.core.bus.event_bus import AsyncEventBus
+        from hdwp.core.report.engine import ReportEngine
+        report_engine = ReportEngine(AsyncEventBus(), session.repository)
+
+    out_dir = reports_dir(session.session_id)
+    try:
+        sarif_path = await report_engine.generate_sarif(out_dir)
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur de génération SARIF : {exc}") from exc
+
+    import json
+    sarif_data = json.loads(sarif_path.read_text(encoding="utf-8"))
+    return JSONResponse(content=sarif_data, media_type="application/json")

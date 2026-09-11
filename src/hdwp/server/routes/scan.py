@@ -8,14 +8,14 @@ import asyncio
 import structlog
 from fastapi import APIRouter, HTTPException, Request
 
-from hdwp.server.models.scan import ScanStatusResponse
+from hdwp.server.models.scan import ScanStartRequest, ScanStatusResponse
 
 router = APIRouter()
 log = structlog.get_logger()
 
 
 @router.post("/scan/start", response_model=ScanStatusResponse)
-async def start_scan(request: Request) -> ScanStatusResponse:
+async def start_scan(request: Request, body: ScanStartRequest = ScanStartRequest()) -> ScanStatusResponse:
     srv = request.app.state
     session = srv.server_state.get_active()
     if not session:
@@ -51,9 +51,14 @@ async def start_scan(request: Request) -> ScanStatusResponse:
                 session.findings_count += 1
         session.bus.on(_evt, _phase_handler)
 
+    _dry_run = body.dry_run
+
     async def _run() -> None:
         try:
             session.set_status("running")
+
+            if _dry_run:
+                session.context.config.options.dry_run = True
 
             # Appliquer la config LLM globale si elle existe
             llm_cfg = getattr(srv, "llm_config", None)
