@@ -31,7 +31,6 @@ archive/
 _hdwp
 prompt
 alembic.ini
-hatch_build.py
 hdwp-context.example.yaml
 hdwp.spec
 hdwp_entry.py
