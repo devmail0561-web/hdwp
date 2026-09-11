@@ -296,6 +296,7 @@ class ActiveCrawler:
         self._script_contents: dict[str, str] = {}
         self._script_pages: dict[str, list[str]] = {}
         self._form_bodies: dict[str, dict[str, str]] = {}  # url → form fields
+        self._ws_urls: set[str] = set()
         self._options_probed: set[str] = set()   # chemins déjà sondés par OPTIONS
         self._methods_probed: set[str] = set()   # chemins déjà sondés pour multi-méthodes
 
@@ -315,6 +316,10 @@ class ActiveCrawler:
     @property
     def script_pages(self) -> dict[str, list[str]]:
         return dict(self._script_pages)
+
+    @property
+    def ws_urls(self) -> frozenset[str]:
+        return frozenset(self._ws_urls)
 
     async def crawl(self, seed_url: str) -> None:
         parsed = urlparse(seed_url)
@@ -500,10 +505,11 @@ class ActiveCrawler:
                     if inline_src.strip():
                         api_endpoints = extractor.extract_endpoints(inline_src, url)
                         for api_url, js_method in api_endpoints:
+                            if js_method == "WS":
+                                self._ws_urls.add(api_url)
+                                continue
                             if api_url not in visited:
-                                # "WS" (WebSocket) ne passe pas dans la queue HTTP
-                                queue_method = js_method if js_method != "WS" else "GET"
-                                queue.append((api_url, depth + 1, queue_method, current_pattern))
+                                queue.append((api_url, depth + 1, js_method, current_pattern))
                         if not api_endpoints and self._llm_layer is not None:
                             await self._llm_enrich(inline_src, url, visited, queue)
                         # Analyser les sinks DOM dangereux dans les scripts inline
@@ -539,9 +545,11 @@ class ActiveCrawler:
                 extractor = js_extractor_cls()
                 api_endpoints = extractor.extract_endpoints(resp.text, url)
                 for api_url, js_method in api_endpoints:
+                    if js_method == "WS":
+                        self._ws_urls.add(api_url)
+                        continue
                     if api_url not in visited:
-                        queue_method = js_method if js_method != "WS" else "GET"
-                        queue.append((api_url, depth + 1, queue_method, ""))
+                        queue.append((api_url, depth + 1, js_method, ""))
 
         log.info(
             "crawl.complete",
@@ -679,11 +687,12 @@ class ActiveCrawler:
             api_endpoints = extractor.extract_endpoints(js_resp.text, resolve_base)
 
             for api_url, js_method in api_endpoints:
+                if js_method == "WS":
+                    self._ws_urls.add(api_url)
+                    continue
                 if api_url not in visited:
-                    # N'ajouter à la file que les URLs dans le scope
-                    queue_method = js_method if js_method != "WS" else "GET"
-                    if self._scope_guard.check(api_url, queue_method) == ScopeVerdict.ALLOWED:
-                        queue.append((api_url, depth + 1, queue_method, ""))
+                    if self._scope_guard.check(api_url, js_method) == ScopeVerdict.ALLOWED:
+                        queue.append((api_url, depth + 1, js_method, ""))
 
             if not api_endpoints and self._llm_layer is not None:
                 await self._llm_enrich(js_resp.text, page_url, visited, queue)

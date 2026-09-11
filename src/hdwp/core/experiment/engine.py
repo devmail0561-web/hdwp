@@ -481,34 +481,41 @@ class ExperimentEngine:
 
         timing_ms: float = 0.0
         norm_resp = normalize_response(0, {}, None, 0.0)
+        _is_non_http = effective_req.url.startswith(("ws://", "wss://", "grpc://"))
         start = time.monotonic()
         try:
-            http_resp = await _send(client, effective_req)
-            timing_ms = (time.monotonic() - start) * 1000
-            self._session_manager.update_csrf(http_resp, role)
-            norm_resp = normalize_response(
-                status_code=http_resp.status_code,
-                headers=dict(http_resp.headers),
-                body=http_resp.text,
-                timing_ms=timing_ms,
-            )
-            # Refresh automatique OAuth2 sur 401 (via resolve_auth_headers async)
-            if http_resp.status_code == 401:
-                try:
-                    new_auth = await self._session_manager.resolve_auth_headers(role)
-                    if new_auth:
-                        effective_req = effective_req.model_copy(
-                            update={"headers": {**effective_req.headers, **new_auth}}
-                        )
-                        http_resp = await _send(client, effective_req)
-                        timing_ms = (time.monotonic() - start) * 1000
-                        norm_resp = normalize_response(
-                            http_resp.status_code, dict(http_resp.headers),
-                            http_resp.text, timing_ms,
-                        )
-                        log.info("oauth2.token_refreshed_after_401", role=role)
-                except Exception:  # noqa: BLE001, S110
-                    pass  # garder la réponse 401 originale
+            if _is_non_http:
+                from hdwp.core.experiment.protocol_dispatch import dispatch_send
+                norm_resp = await dispatch_send(client, effective_req, auth_headers)
+                timing_ms = (time.monotonic() - start) * 1000
+                norm_resp = norm_resp.model_copy(update={"timing_ms": timing_ms})
+            else:
+                http_resp = await _send(client, effective_req)
+                timing_ms = (time.monotonic() - start) * 1000
+                self._session_manager.update_csrf(http_resp, role)
+                norm_resp = normalize_response(
+                    status_code=http_resp.status_code,
+                    headers=dict(http_resp.headers),
+                    body=http_resp.text,
+                    timing_ms=timing_ms,
+                )
+                # Refresh automatique OAuth2 sur 401 (via resolve_auth_headers async)
+                if http_resp.status_code == 401:
+                    try:
+                        new_auth = await self._session_manager.resolve_auth_headers(role)
+                        if new_auth:
+                            effective_req = effective_req.model_copy(
+                                update={"headers": {**effective_req.headers, **new_auth}}
+                            )
+                            http_resp = await _send(client, effective_req)
+                            timing_ms = (time.monotonic() - start) * 1000
+                            norm_resp = normalize_response(
+                                http_resp.status_code, dict(http_resp.headers),
+                                http_resp.text, timing_ms,
+                            )
+                            log.info("oauth2.token_refreshed_after_401", role=role)
+                    except Exception:  # noqa: BLE001, S110
+                        pass  # garder la réponse 401 originale
         except Exception as exc:  # noqa: BLE001
             timing_ms = (time.monotonic() - start) * 1000
             log.warning("experiment.request_failed", url=req.url, error=str(exc))
@@ -560,33 +567,6 @@ class ExperimentEngine:
 
 async def _send(client: httpx.AsyncClient, req: NormalizedRequest) -> httpx.Response:
     """Build and send an httpx request from a NormalizedRequest."""
-    headers: dict[str, Any] = {
-        k: v for k, v in req.headers.items() if v != "[REDACTED]"
-    }
-    # Phase 2: raw body override for smuggling/chunked strategies
-    if req.raw_body_override is not None:
-        return await client.request(
-            method=req.method,
-            url=req.url,
-            headers=headers,
-            content=req.raw_body_override,
-        )
-    if isinstance(req.body, dict):
-        return await client.request(
-            method=req.method,
-            url=req.url,
-            headers=headers,
-            json=req.body,
-        )
-    if isinstance(req.body, str):
-        return await client.request(
-            method=req.method,
-            url=req.url,
-            headers=headers,
-            content=req.body.encode(),
-        )
-    return await client.request(
-        method=req.method,
-        url=req.url,
-        headers=headers,
-    )
+    from hdwp.core.experiment.protocol_dispatch import send_http
+
+    return await send_http(client, req)

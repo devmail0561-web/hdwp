@@ -75,6 +75,38 @@ class ObservationEngine:
             await self._crawl_task
         self._crawl_task = None
 
+        # 3. WebSocket observation
+        if self._context.config.options.enable_ws_scanning and self._crawler.ws_urls:
+            try:
+                from hdwp.core.observation.ws_observer import WebSocketObserver
+                ws_obs = WebSocketObserver(
+                    bus=self._bus,
+                    session_id=self._context.session_id,
+                )
+                await ws_obs.observe(list(self._crawler.ws_urls))
+                log.info("observation_engine.ws_done", urls=len(self._crawler.ws_urls))
+            except Exception as exc:
+                log.debug("ws_observer.skipped", reason=str(exc))
+
+        # 4. gRPC observation (optionnel — nécessite grpcio)
+        if self._context.config.options.enable_grpc_scanning:
+            try:
+                from urllib.parse import urlparse as _urlparse_grpc
+
+                from hdwp.core.observation.grpc_observer import GrpcObserver
+                parsed_target = _urlparse_grpc(self._context.base_url)
+                grpc_target = f"{parsed_target.hostname}:{parsed_target.port or 50051}"
+                tls = parsed_target.scheme == "https"
+                proto_files = self._context.config.discovery.proto_files or None
+                grpc_obs = GrpcObserver(
+                    bus=self._bus,
+                    session_id=self._context.session_id,
+                )
+                await grpc_obs.observe(grpc_target, tls=tls, proto_files=proto_files)
+                log.info("observation_engine.grpc_done", target=grpc_target)
+            except Exception as exc:
+                log.debug("grpc_observer.skipped", reason=str(exc))
+
         # SPA crawl via Playwright — only when proxy is active (port known)
         # Routes browser traffic through the HDWP MITM proxy automatically
         if self._proxy_url:

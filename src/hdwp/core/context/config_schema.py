@@ -22,6 +22,7 @@ class LLMConfig(BaseModel):
 class DiscoveryConfig(BaseModel):
     openapi_spec: str | None = None
     seed_endpoints: list[str] = []
+    proto_files: list[str] = []
 
 
 class TargetConfig(BaseModel):
@@ -86,6 +87,8 @@ class OptionsConfig(BaseModel):
     # Mode dry-run : effectue l'observation et génère les hypothèses mais n'exécute
     # aucune expérience. Retourne le plan (hypothèses + mutations prévues) sans
     # envoyer de requêtes offensives vers la cible.
+    enable_ws_scanning: bool = True
+    enable_grpc_scanning: bool = False
     dry_run: bool = False
 
 

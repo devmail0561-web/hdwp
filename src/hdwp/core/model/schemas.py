@@ -42,6 +42,7 @@ class ObservationType(str, Enum):
     COOKIE = "COOKIE"
     HEADER = "HEADER"
     WS = "WS"
+    GRPC = "GRPC"
     GRAPHQL = "GRAPHQL"
 
 
