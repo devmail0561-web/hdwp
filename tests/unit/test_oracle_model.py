@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import random
 from pathlib import Path
 
 import pytest
+
+_has_sklearn = importlib.util.find_spec("sklearn") is not None
+_needs_sklearn = pytest.mark.skipif(not _has_sklearn, reason="scikit-learn not installed")
 
 from hdwp.core.ml.models.oracle_model import (
     MIN_SAMPLES_FOR_TRAINING,
@@ -94,6 +98,7 @@ def test_train_returns_training_result():
 
 # ── Training ──────────────────────────────────────────────────────────────────
 
+@_needs_sklearn
 def test_train_succeeds_with_enough_samples():
     model = OracleModel()
     samples = _make_dataset(n_confirmed=15, n_refuted=15, n_ambiguous=5)
@@ -103,6 +108,7 @@ def test_train_succeeds_with_enough_samples():
     assert model.is_trained
 
 
+@_needs_sklearn
 def test_train_sets_n_samples_trained():
     model = OracleModel()
     samples = _make_dataset()
@@ -110,6 +116,7 @@ def test_train_sets_n_samples_trained():
     assert model.n_samples_trained == len(samples)
 
 
+@_needs_sklearn
 def test_train_val_accuracy_reasonable():
     model = OracleModel()
     samples = _make_dataset(n_confirmed=20, n_refuted=20, n_ambiguous=5)
@@ -118,6 +125,7 @@ def test_train_val_accuracy_reasonable():
     assert 0.0 <= result.val_accuracy <= 1.0
 
 
+@_needs_sklearn
 def test_class_distribution_in_result():
     model = OracleModel()
     samples = _make_dataset(n_confirmed=15, n_refuted=15, n_ambiguous=5)
@@ -130,6 +138,7 @@ def test_class_distribution_in_result():
 
 # ── Predict after training ─────────────────────────────────────────────────────
 
+@_needs_sklearn
 def test_predict_returns_probabilities_after_training():
     model = OracleModel()
     samples = _make_dataset()
@@ -139,6 +148,7 @@ def test_predict_returns_probabilities_after_training():
     assert total == pytest.approx(1.0, abs=0.01)
 
 
+@_needs_sklearn
 def test_predict_confirmed_sample_leans_confirmed():
     """Un échantillon CONFIRMED doit avoir P(confirmed) élevé après entraînement."""
     model = OracleModel()
@@ -149,6 +159,7 @@ def test_predict_confirmed_sample_leans_confirmed():
     assert pred["confirmed"] > pred["refuted"]
 
 
+@_needs_sklearn
 def test_predict_refuted_sample_leans_refuted():
     model = OracleModel()
     samples = _make_dataset(n_confirmed=40, n_refuted=40, n_ambiguous=10)
@@ -158,6 +169,7 @@ def test_predict_refuted_sample_leans_refuted():
     assert pred["refuted"] > pred["confirmed"]
 
 
+@_needs_sklearn
 def test_predict_deterministic():
     model = OracleModel()
     samples = _make_dataset()
@@ -168,6 +180,7 @@ def test_predict_deterministic():
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
+@_needs_sklearn
 def test_save_and_load(tmp_path: Path):
     model_path = tmp_path / "oracle.joblib"
     model = OracleModel(model_path=model_path)
@@ -204,6 +217,7 @@ def test_state_property():
 
 # ── KB integration ────────────────────────────────────────────────────────────
 
+@_needs_sklearn
 @pytest.mark.asyncio
 async def test_kb_train_oracle_model(tmp_path: Path):
     from hdwp.core.knowledge.base import KnowledgeBase

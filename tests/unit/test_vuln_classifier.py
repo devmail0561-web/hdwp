@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import random
 from pathlib import Path
 
 import pytest
+
+_has_sklearn = importlib.util.find_spec("sklearn") is not None
+_needs_sklearn = pytest.mark.skipif(not _has_sklearn, reason="scikit-learn not installed")
 
 from hdwp.core.ml.models.vuln_classifier import (
     MIN_SAMPLES_FOR_TRAINING,
@@ -112,6 +116,7 @@ class TestTrain:
         assert result.error
         assert not clf.is_trained
 
+    @_needs_sklearn
     def test_train_success(self) -> None:
         clf = VulnClassifier()
         samples = _make_balanced_dataset(n=40)
@@ -123,6 +128,7 @@ class TestTrain:
         assert clf.is_trained
         assert clf.n_samples_trained == 40
 
+    @_needs_sklearn
     def test_train_result_type(self) -> None:
         clf = VulnClassifier()
         result = clf.train(_make_balanced_dataset(n=40))
@@ -146,6 +152,7 @@ class TestTrain:
 
 # ── Prédiction après entraînement ─────────────────────────────────────────────
 
+@_needs_sklearn
 class TestPredictTrained:
     @pytest.fixture
     def trained_clf(self) -> VulnClassifier:
@@ -196,6 +203,7 @@ class TestSaveLoad:
         clf = VulnClassifier(model_path=tmp_path / "missing.joblib")
         assert not clf.load()
 
+    @_needs_sklearn
     def test_save_load_roundtrip(self, tmp_path: Path) -> None:
         path = tmp_path / "vc.joblib"
         clf = VulnClassifier(model_path=path)
@@ -209,6 +217,7 @@ class TestSaveLoad:
         assert clf2.n_samples_trained == clf.n_samples_trained
         assert clf2.vuln_types == clf.vuln_types
 
+    @_needs_sklearn
     def test_predictions_consistent_after_reload(self, tmp_path: Path) -> None:
         path = tmp_path / "vc_pred.joblib"
         clf = VulnClassifier(model_path=path)
