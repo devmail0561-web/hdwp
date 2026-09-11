@@ -30,7 +30,6 @@ ADR-ML-008 : k=8, seed=42, max_iter=100, tol=1e-6.
 from __future__ import annotations
 
 import logging
-import math
 import random
 from datetime import datetime, timezone
 

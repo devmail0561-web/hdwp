@@ -7,7 +7,6 @@ Usage : python -m hdwp.tools.strategy_generator [--dry-run] [--category all|a01.
 from __future__ import annotations
 
 import argparse
-import textwrap
 from pathlib import Path
 
 STRATEGIES_ROOT = Path(__file__).parent.parent / "core" / "exploit" / "strategies"
@@ -42,9 +41,9 @@ def _yaml(id_: str, name: str, desc: str, vuln_type: str, tech_stack: list[str],
         if ph.get("depends_on"):
             lines.append(f'    depends_on: {ph["depends_on"]}')
         lines.append(f'    inject: {ph.get("inject","param_from_winning_request")}')
-        lines.append(f'    payloads:')
+        lines.append('    payloads:')
         lines.append(_payloads(ph["payloads"]))
-        lines.append(f'    success:')
+        lines.append('    success:')
         lines.append(_success(ph["success"]))
         lines.append(f'    output: {ph["output"]}')
         return "\n".join(lines)
@@ -1145,7 +1144,7 @@ def generate_a09() -> list[tuple[str, str]]:
             sid = f"core.a09.log_injection.v{i+1}.{v}"
             results.append((sid, _yaml(
                 id_=sid, name=f"Log Injection v{i+1}.{v}",
-                desc=f"Injection dans les journaux d'application",
+                desc="Injection dans les journaux d'application",
                 vuln_type="log_injection", tech_stack=[],
                 phases=[{"name": "log_inject", "inject": "param_from_winning_request",
                          "payloads": [payload], "success": {"type": "status_code", "status": 200},

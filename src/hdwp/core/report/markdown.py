@@ -76,8 +76,8 @@ def render_markdown(
             if f.explanation is not None:
                 ex = f.explanation
                 lines.append("**Analyse de confiance :**\n")
-                lines.append(f"| Modèle | Score |")
-                lines.append(f"|--------|-------|")
+                lines.append("| Modèle | Score |")
+                lines.append("|--------|-------|")
                 lines.append(f"| V1 (5D linéaire) | {ex.v1_score:.0%} |")
                 lines.append(f"| V2 (10D logistique) | {ex.v2_score:.0%} |")
                 if ex.ml_score > 0:
