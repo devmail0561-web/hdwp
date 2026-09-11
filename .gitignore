@@ -30,7 +30,6 @@ TODO_*.md
 archive/
 _hdwp
 prompt
-alembic.ini
 hdwp-context.example.yaml
 hdwp.spec
 hdwp_entry.py
