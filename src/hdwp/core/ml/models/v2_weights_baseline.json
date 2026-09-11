@@ -1,0 +1,42 @@
+{
+  "weights": {
+    "oracle_strength": 1.543124,
+    "reproducibility": 2.083147,
+    "observation_quality": 0.334235,
+    "behavioral_specificity": 0.985123,
+    "experiment_coverage": 0.38753,
+    "temporal_signal": 1.442239,
+    "crossrole_signal": 1.785066,
+    "invariant_violated": 2.82381,
+    "waf_bypass_success": 0.650856,
+    "causal_depth": 1.244393
+  },
+  "bias": -5.007123,
+  "n_updates": 1000,
+  "updated_at": "2026-09-11T12:18:08.442737+00:00",
+  "calibration": {
+    "epochs": 50,
+    "n_samples": 20,
+    "n_confirmed": 12,
+    "n_refuted": 8,
+    "metrics_before": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 12,
+      "fp": 0,
+      "tn": 8,
+      "fn": 0
+    },
+    "metrics_after": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 12,
+      "fp": 0,
+      "tn": 8,
+      "fn": 0
+    },
+    "data_source": "/home/virus-one/Bureau/project_hdwp/tests/integration/fixtures/calibration_data.jsonl"
+  }
+}
