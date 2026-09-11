@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from hdwp.core.ml.models.similarity_index import SimilarityIndex
     from hdwp.core.ml.models.vuln_classifier import VulnClassifier
     from hdwp.core.model.schemas import ApplicationModelData, Finding
+    from hdwp.core.context.config_schema import TuningConfig
     from hdwp.core.oracle.engine import SemanticOracle
 
 log = logging.getLogger(__name__)
@@ -517,7 +518,7 @@ class MetaLearner:
             return
         try:
             from hdwp.core.ml.models.oracle_model import MIN_SAMPLES_FOR_TRAINING
-            from hdwp.core.bus.events import ML_MODEL_RETRAINED
+            from hdwp.core.bus.events import ML_MODEL_RETRAINED  # noqa: F401
             total = await kb.count_oracle_training_data(only_validated=False)
             if total < MIN_SAMPLES_FOR_TRAINING:
                 return

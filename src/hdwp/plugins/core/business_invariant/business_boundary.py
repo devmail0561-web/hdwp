@@ -80,10 +80,6 @@ class BusinessBoundaryPlugin(HDWPPlugin):
 
     def generate_hypotheses(self, model: ApplicationModelData) -> list[Hypothesis]:
         # Paramètres financiers sur endpoints POST/PUT/PATCH
-        mutation_endpoint_paths = {
-            ep.path for ep in model.endpoints
-            if any(m in ("POST", "PUT", "PATCH") for m in ep.methods)
-        }
         candidates = [
             p for p in model.parameters
             if any(kw in p.name.lower() for kw in FINANCIAL_KEYWORDS)

@@ -38,6 +38,7 @@ from hdwp.core.experiment.session_manager import SessionManager
 from hdwp.core.experiment.temporal_module import TemporalModule
 from hdwp.core.model.schemas import (
     ApplicationModelData,
+    ConcreteExperimentPlan,
     ExperimentResult,
     ExperimentSpec,
     Hypothesis,

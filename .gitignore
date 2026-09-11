@@ -35,7 +35,6 @@ hatch_build.py
 hdwp-context.example.yaml
 hdwp.spec
 hdwp_entry.py
-pyproject.toml
 error.txt
 mon-pentest.yaml
 *-pentest.yaml

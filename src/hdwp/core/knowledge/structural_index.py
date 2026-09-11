@@ -86,7 +86,7 @@ def build_signature(
 
     import hashlib
     stack_str = ",".join(sorted(tech_stack))
-    tech_hash = hashlib.md5(stack_str.encode()).hexdigest()[:8]
+    tech_hash = hashlib.md5(stack_str.encode(), usedforsecurity=False).hexdigest()[:8]
 
     return StructuralSignature(
         session_id=session_id,

@@ -170,7 +170,7 @@ def _sqli_chain(param_name: str, param_loc: str, ep_path: str) -> list[Experimen
 class SQLiPlugin(HDWPPlugin):
     """Détecte les vulnérabilités d'injection SQL."""
 
-    def __init__(self, payload_db: "PayloadDatabase | None" = None):
+    def __init__(self, payload_db: "PayloadDatabase | None" = None):  # noqa: F821
         """Phase 0: injection PayloadDatabase (full integration Phase 1)."""
         self._payload_db = payload_db
 
@@ -227,9 +227,9 @@ class SQLiPlugin(HDWPPlugin):
 
     def _build_adaptive_experiments(
         self,
-        param: "Parameter",
+        param: "Parameter",  # noqa: F821
         ep_path: str,
-        variants: list["PayloadVariant"],
+        variants: list["PayloadVariant"],  # noqa: F821
     ) -> list[ExperimentSpec]:
         """Construit ExperimentSpec avec trigger_condition + follow_up_specs.
 

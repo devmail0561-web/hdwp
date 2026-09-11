@@ -166,7 +166,7 @@ def _classify_edge(
     to_ep: str,
     ep_response_fields: dict[str, set[str]],
     ep_request_params: dict[str, set[str]],
-) -> FlowEdgeType:
+) -> FlowEdgeType:  # noqa: F821
     from hdwp.core.model.schemas import FlowEdgeType
 
     a_fields = ep_response_fields.get(from_ep, set())

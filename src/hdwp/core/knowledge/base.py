@@ -767,7 +767,7 @@ class KnowledgeBase:
         async with AsyncSession(engine, expire_on_commit=False) as session:
             stmt = select(TrainingSampleOracleRecord)
             if only_validated:
-                stmt = stmt.where(TrainingSampleOracleRecord.human_validated == True)
+                stmt = stmt.where(TrainingSampleOracleRecord.human_validated == True)  # noqa: E712
             result = await session.exec(stmt)
             records = result.all()
 
@@ -876,7 +876,7 @@ class KnowledgeBase:
         async with engine.connect() as conn:
             stmt = _sql_select(_func.count()).select_from(TrainingSampleOracleRecord)
             if only_validated:
-                stmt = stmt.where(TrainingSampleOracleRecord.human_validated == True)
+                stmt = stmt.where(TrainingSampleOracleRecord.human_validated == True)  # noqa: E712
             result = await conn.execute(stmt)
             return result.scalar() or 0
 

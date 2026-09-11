@@ -314,7 +314,7 @@ def rule_sqli_exfil(
             )
             pk_col = next((c.name for c in getattr(target_table, "columns", []) if c.is_pk), "id")
             table_name = getattr(target_table, "name", "users")
-            step1_payload = f"1 UNION SELECT {pk_col},email FROM {table_name}--"
+            step1_payload = f"1 UNION SELECT {pk_col},email FROM {table_name}--"  # nosec B608
             description = f"Extraction DB depuis '{table_name}' via injection SQL"
         else:
             # Fallback générique sans schéma connu

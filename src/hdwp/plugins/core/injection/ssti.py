@@ -39,7 +39,7 @@ SSTI_PAYLOADS = [
 class SSTIPlugin(HDWPPlugin):
     """Détecte les vulnérabilités Server-Side Template Injection."""
 
-    def __init__(self, payload_db: "PayloadDatabase | None" = None):
+    def __init__(self, payload_db: "PayloadDatabase | None" = None):  # noqa: F821
         """Initialise le plugin SSTI avec PayloadDatabase optionnel.
 
         Args:

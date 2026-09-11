@@ -167,7 +167,7 @@ def _is_valid_path(path: str) -> bool:
 
 # ── DOM Sink Analysis ─────────────────────────────────────────────────────────
 
-from dataclasses import dataclass
+from dataclasses import dataclass  # noqa: E402
 
 
 @dataclass

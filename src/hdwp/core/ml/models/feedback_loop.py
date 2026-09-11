@@ -68,7 +68,7 @@ SESSION_DECAY: float = 0.95
 
 # Phase 0.1: Supprimer duplication DEFAULT_WEIGHTS
 # Importer depuis confidence.py (single source of truth)
-from hdwp.core.oracle.confidence import (
+from hdwp.core.oracle.confidence import (  # noqa: E402
     V2_DEFAULT_WEIGHTS,
     V2_DEFAULT_BIAS,
     extract_v2_weights_from_tuning,

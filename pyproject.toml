@@ -1,0 +1,125 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hdwp"
+version = "4.0.0.dev9"
+description = "Hypothesis-Driven Web Pentesting Engine"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "M. TENDENG" },
+]
+
+dependencies = [
+    "httpx>=0.28",
+    "socksio>=1.0",
+    "pywebview>=5.0",
+    "pyee>=9.0",
+    "sqlmodel>=0.0.22",
+    "aiosqlite>=0.20",
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "pydantic>=2.10",
+    "rich>=13.0",
+    "structlog>=24.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "websockets>=13.0",
+    "pyotp>=2.9",
+]
+
+[project.optional-dependencies]
+proxy = ["mitmproxy>=12.0"]
+llm = ["anthropic>=0.40", "openai>=1.0"]
+ml = ["numpy>=2.0", "scikit-learn>=1.5"]
+native = []
+spa = ["playwright>=1.40"]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.10",
+    "ruff>=0.7",
+    "respx>=0.22",
+    "alembic>=1.13",
+]
+
+[project.scripts]
+hdwp = "hdwp.cli.main:app"
+
+[project.entry-points."hdwp.plugins"]
+"core.authorization.bola" = "hdwp.plugins.core.authorization.bola:BOLAPlugin"
+"core.authorization.authz" = "hdwp.plugins.core.authorization.authz:AuthZPlugin"
+"core.configuration.cors" = "hdwp.plugins.core.configuration.cors:CORSPlugin"
+"core.session_property.jwt" = "hdwp.plugins.core.session_property.jwt:JWTPlugin"
+"core.information_flow.info_disclosure" = "hdwp.plugins.core.information_flow.info_disclosure:InfoDisclosurePlugin"
+"core.information_flow.ssrf" = "hdwp.plugins.core.information_flow.ssrf:SSRFPlugin"
+"core.business_invariant.race_condition" = "hdwp.plugins.core.business_invariant.race_condition:RaceConditionPlugin"
+"core.injection.sqli" = "hdwp.plugins.core.injection.sqli:SQLiPlugin"
+"core.injection.xss" = "hdwp.plugins.core.injection.xss:XSSPlugin"
+"core.injection.ssti" = "hdwp.plugins.core.injection.ssti:SSTIPlugin"
+"core.injection.cmdi" = "hdwp.plugins.core.injection.cmdi:CMDiPlugin"
+"core.injection.mass_assignment" = "hdwp.plugins.core.injection.mass_assignment:MassAssignmentPlugin"
+"core.injection.path_traversal" = "hdwp.plugins.core.injection.path_traversal:PathTraversalPlugin"
+"core.injection.nosqli" = "hdwp.plugins.core.injection.nosqli:NoSQLiPlugin"
+"core.information_flow.open_redirect" = "hdwp.plugins.core.information_flow.open_redirect:OpenRedirectPlugin"
+"core.business_invariant.business_boundary" = "hdwp.plugins.core.business_invariant.business_boundary:BusinessBoundaryPlugin"
+"core.authorization.method_override" = "hdwp.plugins.core.authorization.method_override:MethodOverridePlugin"
+"core.temporal.session_replay" = "hdwp.plugins.core.temporal.session_replay:SessionReplayPlugin"
+# Nouveaux plugins — CWEs non couverts
+"core.injection.anomaly_probing" = "hdwp.plugins.core.injection.anomaly_probing:AnomalyProbingPlugin"
+"core.injection.xxe" = "hdwp.plugins.core.injection.xxe:XXEPlugin"
+"core.injection.graphql" = "hdwp.plugins.core.injection.graphql:GraphQLPlugin"
+"core.injection.crlf" = "hdwp.plugins.core.injection.crlf_injection:CRLFPlugin"
+"core.injection.deserialization" = "hdwp.plugins.core.injection.deserialization:DeserializationPlugin"
+"core.injection.ldap_injection" = "hdwp.plugins.core.injection.ldap_injection:LDAPInjectionPlugin"
+"core.injection.xpath_injection" = "hdwp.plugins.core.injection.xpath_injection:XPathInjectionPlugin"
+"core.injection.el_injection" = "hdwp.plugins.core.injection.el_injection:ELInjectionPlugin"
+"core.injection.prototype_pollution" = "hdwp.plugins.core.injection.prototype_pollution:PrototypePollutionPlugin"
+"core.authorization.bfla" = "hdwp.plugins.core.authorization.bfla:BFLAPlugin"
+"core.authorization.csrf" = "hdwp.plugins.core.authorization.csrf:CSRFPlugin"
+"core.session_property.session_fixation" = "hdwp.plugins.core.session_property.session_fixation:SessionFixationPlugin"
+"core.file_operations.file_upload" = "hdwp.plugins.core.file_operations.file_upload:FileUploadPlugin"
+"core.configuration.security_headers" = "hdwp.plugins.core.configuration.security_headers:SecurityHeadersPlugin"
+"core.configuration.cache_poisoning" = "hdwp.plugins.core.configuration.cache_poisoning:CachePoisoningPlugin"
+"core.configuration.http_smuggling" = "hdwp.plugins.core.configuration.http_smuggling:HTTPSmugglingPlugin"
+"core.information_flow.http_parameter_pollution" = "hdwp.plugins.core.information_flow.http_parameter_pollution:HTTPParameterPollutionPlugin"
+# Plugins tech-adaptatifs (framework-spécifiques)
+"core.configuration.spring_actuator" = "hdwp.plugins.core.configuration.spring_actuator:SpringActuatorPlugin"
+"core.injection.django_debug" = "hdwp.plugins.core.injection.django_debug:DjangoDebugPlugin"
+"core.authorization.laravel_mass_assign" = "hdwp.plugins.core.authorization.laravel_mass_assign:LaravelMassAssignPlugin"
+
+[project.entry-points."hdwp.mutations"]
+identity_swap        = "hdwp.core.experiment.request_selector:plan_identity_swap"
+object_ref_change    = "hdwp.core.experiment.request_selector:plan_object_ref_change"
+privilege_escalation = "hdwp.core.experiment.request_selector:plan_privilege_escalation"
+field_injection      = "hdwp.core.experiment.request_selector:plan_field_injection"
+jwt_manipulation     = "hdwp.core.experiment.request_selector:plan_jwt_manipulation"
+origin_test          = "hdwp.core.experiment.request_selector:plan_origin_test"
+race_condition       = "hdwp.core.experiment.request_selector:plan_race_condition"
+token_reuse          = "hdwp.core.experiment.request_selector:plan_token_reuse"
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hdwp"]
+artifacts = ["src/hdwp/app/dist/**"]
+include = ["src/hdwp/**/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests against real vulnerable targets (requires HDWP_INTEGRATION_TARGETS=1)",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100

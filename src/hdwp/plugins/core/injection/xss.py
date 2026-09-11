@@ -117,9 +117,9 @@ class XSSPlugin(HDWPPlugin):
 
     def _build_adaptive_experiments(
         self,
-        param: "Parameter",
+        param: "Parameter",  # noqa: F821
         ep_path: str,
-        variants: list["PayloadVariant"],
+        variants: list["PayloadVariant"],  # noqa: F821
     ) -> list[ExperimentSpec]:
         """Construit ExperimentSpec avec trigger_condition + follow_up_specs.
 
