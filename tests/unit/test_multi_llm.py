@@ -7,7 +7,12 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
+import importlib.util
+
 import pytest
+
+_has_openai = importlib.util.find_spec("openai") is not None
+_skip_no_openai = pytest.mark.skipif(not _has_openai, reason="openai package not installed")
 
 from hdwp.core.context.config_schema import LLMConfig
 from hdwp.core.llm.layer import (
@@ -71,6 +76,7 @@ def test_create_llm_layer_anthropic_no_key() -> None:
     assert result is None
 
 
+@_skip_no_openai
 def test_create_llm_layer_openai() -> None:
     """Config provider=openai + OPENAI_API_KEY → OpenAICompatibleLLMLayer."""
     config = LLMConfig(enabled=True, provider="openai", model="gpt-4o-mini")
@@ -90,6 +96,7 @@ def test_create_llm_layer_openai_no_key() -> None:
     assert result is None
 
 
+@_skip_no_openai
 def test_create_llm_layer_ollama_with_base_url() -> None:
     """Config provider=ollama + base_url → OpenAICompatibleLLMLayer, no key needed."""
     config = LLMConfig(
@@ -107,6 +114,7 @@ def test_create_llm_layer_ollama_with_base_url() -> None:
     )
 
 
+@_skip_no_openai
 def test_create_llm_layer_ollama_default_base_url() -> None:
     """Config provider=ollama without base_url → uses localhost:11434/v1 default."""
     config = LLMConfig(enabled=True, provider="ollama", model="mistral")
