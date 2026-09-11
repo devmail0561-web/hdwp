@@ -8,7 +8,6 @@ from typing import Any
 import httpx
 
 from hdwp.core.model.schemas import NormalizedRequest, NormalizedResponse
-from hdwp.core.observation.normalizer import normalize_response
 
 
 async def dispatch_send(

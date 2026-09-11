@@ -139,9 +139,6 @@ class GrpcObserver:
     ) -> None:
         for proto_path in proto_files:
             try:
-                from google.protobuf import descriptor_pb2
-                from google.protobuf.compiler import plugin_pb2  # noqa: F401
-
                 with open(proto_path, "r") as f:
                     content = f.read()
 
