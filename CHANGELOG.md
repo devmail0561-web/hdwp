@@ -6,6 +6,46 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
+## [4.2.0-dev] — 2026-09-11 — WebSocket/gRPC, calibration ML, CI stabilisée
+
+### Couverture protocoles WebSocket & gRPC (Action 9)
+
+**Ajoutés**
+- `ws_observer.py` : observation endpoints WebSocket (upgrade, frames, subprotocols)
+- `grpc_observer.py` : observation services gRPC (reflection, .proto fallback, TLS, health check)
+- `ws_injector.py` : injection payloads dans frames WebSocket
+- `grpc_injector.py` : injection payloads dans messages gRPC (protobuf)
+- `protocol_dispatch.py` : `dispatch_send()` — routage transparent HTTP/WS/gRPC
+- `observation/engine.py` : intégration observers WS/gRPC dans le pipeline
+- `active_crawler.py` : collecte URLs WS nativement (plus de conversion GET)
+- `config_schema.py` : +options `ws_enabled`, `grpc_enabled`, `grpc_proto_path`
+- `schemas.py` : +champ `protocol` sur `NormalizedRequest`
+- `pyproject.toml` : extra `grpcio` optionnel
+- `experiment/engine.py` : refactorisé pour utiliser `dispatch_send` au lieu de HTTP direct
+- 6 fichiers de tests (563 lignes) : ws_observer, ws_injector, grpc_observer, grpc_injector, protocol_dispatch
+
+### Calibration ConfidenceModelV2
+
+**Ajoutés**
+- `tools/calibrate_confidence.py` : script calibration depuis JSONL annoté
+- `core/ml/models/v2_weights_baseline.json` : 42 poids baseline calibrés
+- `tests/integration/fixtures/calibration_data.jsonl` : 20 samples de référence
+
+### CI / Lint
+
+**Corrigés**
+- ruff : 35 erreurs + auto-fix F401/F541 (imports inutilisés, f-strings vides)
+- bandit : MD5 (B303) et SQL string concat (B608)
+- hatch_build.py : skip frontend en CI, pnpm en local uniquement
+- alembic.ini tracké, checkout@v5, setup-python 3.12 sur 3 jobs self-hosted
+- Tests optionnels : skip propre quand sklearn ou openai absents
+
+### Stats
+
+- 11 commits, ~1500 lignes ajoutées, 1365 tests
+
+---
+
 ## [4.1.0-dev] — 2026-09-10 — Système d'exploitation 100% data-driven
 
 ### Identifié — 2026-09-10

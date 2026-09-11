@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hdwp"
-version = "4.0.0.dev9"
+version = "4.2.0"
 description = "Hypothesis-Driven Web Pentesting Engine"
 readme = "README.md"
 license = "MIT"
