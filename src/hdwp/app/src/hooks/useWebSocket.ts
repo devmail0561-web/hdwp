@@ -6,7 +6,7 @@ import { useV3Store } from '../stores/v3Store'
 import type {
   EndpointNode, Finding, FlowMap,
   ThreatModelUpdated, InvariantViolated, CrossRoleDiff,
-  TemporalAnomaly, WafSignature, PayloadAdapted,
+  TemporalAnomaly, WafSignature,
   GoalReached, PreconditionMissing,
 } from '../types/hdwp'
 
@@ -90,8 +90,6 @@ export function useWebSocket() {
           useV3Store.getState().addTemporalAnomaly(event.payload as TemporalAnomaly)
         if (event.type === 'waf.signature.detected')
           useV3Store.getState().addWafSignature(event.payload as WafSignature)
-        if (event.type === 'payload.adapted')
-          useV3Store.getState().addPayloadAdapted(event.payload as PayloadAdapted)
         if (event.type === 'goal.reached')
           useV3Store.getState().addGoalReached(event.payload as GoalReached)
         if (event.type === 'precondition.missing')

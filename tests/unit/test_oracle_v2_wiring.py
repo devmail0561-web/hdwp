@@ -16,7 +16,6 @@ from hdwp.core.bus.events import (
     CROSSROLE_DIFF_CONFIRMED,
     INVARIANT_VIOLATED,
     ML_ORACLE_VERDICT,
-    PAYLOAD_ADAPTED,
     TEMPORAL_ANOMALY_DETECTED,
     HDWPEvent,
 )
@@ -121,56 +120,6 @@ async def test_invariant_handler_ignores_non_dict():
     await bus.emit(INVARIANT_VIOLATED, 42, source="test")
     await bus.drain()
     assert len(oracle._invariant_signals) == 0
-
-
-@pytest.mark.asyncio
-async def test_payload_adapted_waf_bypass_tracked():
-    oracle, bus, _ = _make_oracle()
-    # Clé réelle = "adaptation" (vérifié dans adaptive_payload.py)
-    # Clé réelle pour l'hypothèse = "hypothesis_id"
-    await bus.emit(
-        PAYLOAD_ADAPTED,
-        {"hypothesis_id": "HYP-007", "adaptation": "waf_bypass", "endpoint": "/api/login"},
-        source="test",
-    )
-    await bus.drain()
-    assert "HYP-007" in oracle._waf_bypass_attempted
-
-
-@pytest.mark.asyncio
-async def test_payload_adapted_non_waf_not_tracked():
-    oracle, bus, _ = _make_oracle()
-    await bus.emit(
-        PAYLOAD_ADAPTED,
-        {"hypothesis_id": "HYP-007", "adaptation": "error_refinement", "endpoint": "/api/login"},
-        source="test",
-    )
-    await bus.drain()
-    assert "HYP-007" not in oracle._waf_bypass_attempted
-
-
-@pytest.mark.asyncio
-async def test_payload_adapted_uses_endpoint_key_not_endpoint_path():
-    """Régression : adaptive_payload.py émet "endpoint", pas "endpoint_path"."""
-    oracle, bus, _ = _make_oracle()
-    # Simuler un payload avec le mauvais nom de clé (ce qui ne devrait pas l'enregistrer)
-    await bus.emit(
-        PAYLOAD_ADAPTED,
-        {"hypothesis_id": "HYP-008", "adaptation": "waf_bypass", "endpoint_path": "/wrong"},
-        source="test",
-    )
-    await bus.drain()
-    # Le handler ne se fie pas à "endpoint_path" pour le WAF bypass
-    # L'hypothesis_id doit quand même être enregistré (clé hypothesis_id présente)
-    assert "HYP-008" in oracle._waf_bypass_attempted
-
-
-@pytest.mark.asyncio
-async def test_payload_adapted_handler_ignores_non_dict():
-    oracle, bus, _ = _make_oracle()
-    await bus.emit(PAYLOAD_ADAPTED, "not a dict", source="test")
-    await bus.drain()
-    assert len(oracle._waf_bypass_attempted) == 0
 
 
 @pytest.mark.asyncio

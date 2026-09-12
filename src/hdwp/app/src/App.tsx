@@ -5,10 +5,7 @@ import { ScanTab } from './components/ScanTab'
 import { FindingsTab } from './components/FindingsTab'
 import { FlowTab } from './components/FlowTab'
 import { ReportTab } from './components/ReportTab'
-import { ExploitTab } from './components/ExploitTab'
-import { PayloadTab } from './components/PayloadTab'
 import { PluginsTab } from './components/PluginsTab'
-import { StrategiesTab } from './components/StrategiesTab'
 import { SettingsTab } from './components/SettingsTab'
 import { IntelTab } from './components/IntelTab'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -136,10 +133,7 @@ export function App() {
           {activeTab === 'flow'     && <FlowTab />}
           {activeTab === 'intel'    && <IntelTab />}
           {activeTab === 'report'   && <ReportTab />}
-          {activeTab === 'payload'  && <PayloadTab />}
-          {activeTab === 'exploit'  && <ExploitTab />}
           {activeTab === 'plugins'     && <PluginsTab />}
-          {activeTab === 'strategies'  && <StrategiesTab />}
           {activeTab === 'settings'    && <SettingsTab onTabChange={setActiveTab} />}
         </div>
       </div>

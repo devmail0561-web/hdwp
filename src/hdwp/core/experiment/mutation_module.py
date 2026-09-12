@@ -147,6 +147,8 @@ def apply_field_injection(plan: ConcreteExperimentPlan, sm: SessionManager) -> N
             return req.model_copy(update={"body": new_body})
         case "body" if isinstance(req.body, str):
             return req.model_copy(update={"body": req.body + payload})
+        case "body" if req.body is None:
+            return req.model_copy(update={"body": {param: payload}})
         case "path":
             new_url = _replace_id_in_path(req.url, payload, param)
             return req.model_copy(update={"url": new_url})

@@ -2,9 +2,9 @@
 
 # HDWP
 
-**Hypothesis-Driven Web Pentesting Engine**
+**Semantic Web Security Scanner — ML-Optimized**
 
-*A semantic security testing engine that falsifies formal security properties — not signatures, not payloads.*
+*Builds a semantic model of the application, derives formal security properties, and falsifies them through behavioral experiments. No signatures. No exploit layer.*
 
 <br/>
 
@@ -12,15 +12,13 @@
 [![Engine](https://img.shields.io/badge/Engine-Python_3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![UI](https://img.shields.io/badge/UI-React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 [![Build](https://img.shields.io/badge/Build-Vite_8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev)
-[![Database](https://img.shields.io/badge/Database-SQLite_async-003B57?style=flat-square&logo=sqlite&logoColor=white)]()
 [![ML](https://img.shields.io/badge/ML-scikit--learn-F7931E?style=flat-square&logo=scikitlearn&logoColor=white)]()
 
 [![Plugins](https://img.shields.io/badge/Plugins-38_semantic-8b5cf6?style=flat-square)]()
 [![Mutations](https://img.shields.io/badge/Mutations-31_types-06b6d4?style=flat-square)]()
-[![Strategies](https://img.shields.io/badge/Strategies-1040_YAML-0891b2?style=flat-square)]()
-[![Tests](https://img.shields.io/badge/Tests-1301_passing-22c55e?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-1260_passing-22c55e?style=flat-square)]()
 [![Release](https://img.shields.io/github/v/release/devmail0561-web/hdwp?include_prereleases&style=flat-square&color=f97316)](https://github.com/devmail0561-web/hdwp/releases/latest)
-[![Binary](https://img.shields.io/badge/Binary-standalone_230_MB-1d4ed8?style=flat-square)](https://github.com/devmail0561-web/hdwp/releases/latest)
+[![Binary](https://img.shields.io/badge/Binary-standalone-1d4ed8?style=flat-square)](https://github.com/devmail0561-web/hdwp/releases/latest)
 
 </div>
 
@@ -41,6 +39,7 @@
 
 - [Philosophy](#philosophy)
 - [How It Compares](#how-it-compares)
+- [ML Pipeline](#ml-pipeline)
 - [What HDWP Analyzes](#what-hdwp-analyzes)
 - [Features](#features)
 - [Plugins](#plugins)
@@ -66,13 +65,14 @@ HDWP operates on a different premise. It **models the application semantically**
 ApplicationModel  (semantic graph — endpoints, parameters, roles, data sensitivity)
   → SecurityPropertyEngine  (formal theorems: "this endpoint must be access-controlled")
     → HypothesisEngine      (falsifiable hypotheses from each property)
-      → ExperimentEngine    (baseline request + mutation, encoding pipeline, WAF bypass)
+      → ExperimentEngine    (baseline request + mutation, encoding pipeline)
         → SemanticOracle    (behavioral diff: is the mutation distinguishable from baseline?)
-          → ExploitEngine   (1040 YAML strategies — confirm exploitability, generate PoC)
-            → AttackGraph   (A* multi-step chains: account takeover, exfil, privilege escalation)
+          → MetaLearner     (8 ML models — score, explain, learn, adapt across sessions)
+            → Finding       (confirmed vulnerability with confidence breakdown)
+              → AttackGraph (A* multi-step chain planning from confirmed findings)
 ```
 
-The result: HDWP detects **unknown vulnerability classes** through behavioral anomaly detection, not just the 38 named CWEs it covers explicitly.
+The result: HDWP detects **unknown vulnerability classes** through behavioral anomaly detection, not just the 38 named CWEs it covers explicitly. And it learns.
 
 ---
 
@@ -85,23 +85,107 @@ The result: HDWP detects **unknown vulnerability classes** through behavioral an
 | Unknown anomaly detection (no signatures) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Multi-role behavioral diff (BOLA/AuthZ) | ✅ | Partial | ❌ | ❌ | ❌ |
 | ML confidence scoring with explainability | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Cross-session ML learning (persistent KB) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Thompson Sampling mutation prioritization | ✅ | ❌ | ❌ | ❌ | ❌ |
 | A\* multi-step attack chain planning | ✅ | ❌ | ❌ | ❌ | ❌ |
 | CVE scanning via OSV.dev (JS + backend) | ✅ | ❌ | Partial | Partial | ✅ |
-| Adaptive WAF bypass (15 strategies) | ✅ | Manual | ❌ | ❌ | Partial |
 | MITM proxy + SPA browser crawl | ✅ | ✅ | ✅ | ❌ | ❌ |
 | JS dynamic API extraction (fetch/axios/XHR) | ✅ | Partial | Partial | ❌ | ❌ |
-| Package manifest + header version fingerprint | ✅ | ❌ | ❌ | ✅ | ✅ |
-| Exploit strategy library (1040 YAML) | ✅ | ❌ | ❌ | ❌ | ✅ |
-| Auto-generated HTML PoC | ✅ | Manual | ❌ | ❌ | Partial |
+| WebSocket + gRPC protocol coverage | ✅ | Partial | ❌ | ❌ | ❌ |
 | Fully open-source | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Standalone binary (no install) | ✅ | ❌ | ❌ | ❌ | ✅ |
 
 **Key differentiators:**
 - **Burp Suite Pro** is a powerful manual proxy with an active scanner. It requires a browser, a license, and significant manual effort. It has no semantic model and cannot plan multi-step attack chains.
 - **OWASP ZAP** is a good free alternative to Burp but relies on signature-based scanning. Its automation framework requires scripting effort to customize.
 - **Nikto** is a fast but shallow banner/header/path scanner with no semantic understanding.
-- **Nuclei** has a large template library (similar to HDWP strategies) but templates are static signatures, not behavioral hypotheses. No application model, no cross-role diff.
-- **HDWP** is the only tool in this list that builds a semantic graph of the application, derives security properties from it, and uses behavioral comparison to detect violations — including anomalies with no known signature.
+- **Nuclei** has a large template library but templates are static signatures, not behavioral hypotheses. No application model, no cross-role diff, no ML.
+- **HDWP** is the only tool in this list that builds a semantic graph of the application, derives security properties from it, uses behavioral comparison to detect violations, and improves across sessions through machine learning.
+
+---
+
+## ML Pipeline
+
+HDWP embeds 8 ML models coordinated by a unified `MetaLearner` facade. All models persist their state in a cross-session `KnowledgeBase` (SQLite). They learn from every scan and improve over time.
+
+### ConfidenceModelV2
+
+A **10-dimensional logistic regression** that produces the final `[0,1]` confidence score for each finding. Dimensions:
+
+| Dimension | What it measures |
+|---|---|
+| `oracle_strength` | How clearly the behavioral diff signals a violation |
+| `reproducibility` | Fraction of experiment replays that confirm the violation |
+| `observation_quality` | Completeness and diversity of the observation corpus |
+| `behavioral_specificity` | How specific the mutation is to the suspected CWE class |
+| `experiment_coverage` | Breadth of parameter locations and mutation variants tested |
+| `temporal_signal` | Timing anomaly escalation level (blind injection detection) |
+| `crossrole_signal` | Cross-role differential confidence |
+| `invariant_signal` | Whether a learned invariant was violated |
+| `waf_signal` | WAF bypass success indicator |
+| `ml_oracle_boost` | `OracleModel` logistic regression score |
+
+Weights are updated cross-session by `FeedbackLoop` from confirmed vs. false-positive findings.
+
+### OracleModel
+
+A **scikit-learn logistic classifier** trained on the raw 10D feature vectors from `SemanticOracle` verdicts. Provides an independent probability estimate that reinforces (or weakens) the `ConfidenceModelV2` score.
+
+Trains automatically when ≥ 50 labeled examples are available in the `KnowledgeBase`. Stored as a joblib-serialized model, reloaded at each session startup.
+
+### VulnClassifier
+
+A **per-endpoint vulnerability type predictor**. Takes the endpoint profile (method, path pattern, content type, observed parameter names) and predicts which mutation types are likely to yield findings on that endpoint.
+
+Fed into `MetaLearner.sort_hypotheses()` to prioritize the hypothesis queue before scanning begins.
+
+### PayloadOptimizer
+
+A **Thompson Sampling contextual bandit** with arms keyed by `(endpoint_fingerprint, mutation_type)`.
+
+- **Fingerprint** encodes `{method}:{has_auth}:{has_path_params}:{content_type_bucket}` — 6×2×2×3 = 72 possible values.
+- **Reward signal**: `+1.0` for CONFIRMED, `-0.5` for REFUTED, `0.0` for AMBIGUOUS.
+- The bandit reorders hypotheses so that (fingerprint, mutation) pairs with a high historical success rate on similar endpoints are tried first.
+- Persisted in `KnowledgeBase.payload_optimizer_stats` between sessions.
+
+### HypothesisBandit
+
+A **UCB1 (Upper Confidence Bound) bandit** with arms keyed by `(property_type, mutation_type)`.
+
+Complements `PayloadOptimizer`: while `PayloadOptimizer` optimizes by endpoint profile, `HypothesisBandit` optimizes by abstract property × mutation type — a higher-level signal that generalizes across endpoint types.
+
+### ActiveLearner
+
+An **active learning component** that identifies the hypotheses where the model is most uncertain (`score ≈ 0.5`) and promotes them for testing. Ensures the bandit models receive informative training examples, not just easy positives/negatives.
+
+### ExplainabilityLayer
+
+Attached to each confirmed finding, the `ExplainabilityLayer` produces a **per-dimension contribution breakdown**:
+
+```json
+{
+  "oracle_strength":        { "score": 0.91, "contribution": "HIGH" },
+  "reproducibility":        { "score": 0.88, "contribution": "HIGH" },
+  "temporal_signal":        { "score": 0.00, "contribution": "NONE" },
+  "crossrole_signal":       { "score": 0.75, "contribution": "MEDIUM" },
+  "ml_oracle_boost":        { "score": 0.82, "contribution": "HIGH" },
+  "overall":                0.87,
+  "top_contributors":       ["oracle_strength", "ml_oracle_boost", "reproducibility"]
+}
+```
+
+Displayed in the FINDINGS tab and included in JSON/Markdown reports.
+
+### MetaLearner (facade)
+
+Orchestrates all 8 models. Exposes a single API to `engine.py`:
+
+| Method | What it does |
+|---|---|
+| `await load(kb)` | Loads all models from `KnowledgeBase` at session start |
+| `wire(bus, oracle)` | Subscribes to bus events to feed the feedback loop |
+| `sort_hypotheses(hypotheses)` | Reorders the hypothesis queue using `HypothesisBandit` + `PayloadOptimizer` + `ActiveLearner` |
+| `await persist(kb)` | Saves updated model weights to `KnowledgeBase` at session end |
+| `stats()` | Returns a snapshot of all model states for the `/api/state` endpoint |
 
 ---
 
@@ -148,6 +232,10 @@ HDWP performs deep multi-source discovery. It leaves nothing unexamined.
 - Playwright-based crawler routes a real browser through the HDWP MITM proxy — captures all XHR and fetch calls from rendered JavaScript applications
 - Passive proxy capture mode (mitmproxy) — records real user browser traffic as an additional seed
 
+**Protocol coverage**
+- **WebSocket** — `ws://` and `wss://` endpoints observed and injected via `WsObserver` + `WsInjector`
+- **gRPC** — `GrpcObserver` enumerates services via server reflection; `GrpcInjector` injects mutations into unary calls
+
 ### Version fingerprinting and CVE scanning
 
 HDWP fingerprints every library and framework it encounters and queries the **OSV.dev vulnerability database**:
@@ -180,25 +268,26 @@ Offline mode supported — query a local JSON database instead of the live OSV.d
 - **Field entropy analysis** — detects randomness changes in fields that should be stable
 - **CrossRole diff** (`STRUCTURAL` / `VALUE` / `IDENTITY`) — compares the same request across different authenticated roles to detect BOLA and AuthZ issues
 
-### Intelligence and ML
-- **ConfidenceModelV2** — 10-dimensional logistic model scores each finding (0–1); trained from confirmed vs. false-positive feedback across sessions
-- **ExplainabilityLayer** — per-finding explanation of which dimensions drove the confidence verdict
-- **MetaLearner** — unified ML facade; cross-session learning via a persistent `KnowledgeBase` (SQLite)
+### ML intelligence (8 models)
+- **ConfidenceModelV2** — 10-dimensional logistic model; produces the final `[0,1]` confidence score per finding
+- **OracleModel** — scikit-learn classifier trained on confirmed vs. false-positive verdicts
+- **VulnClassifier** — per-endpoint vulnerability type prediction to focus the hypothesis queue
+- **PayloadOptimizer** — Thompson Sampling bandit over `(endpoint_fingerprint × mutation_type)`
+- **HypothesisBandit** — UCB1 bandit over `(property_type × mutation_type)`
+- **ActiveLearner** — promotes uncertain hypotheses to maximize training signal
+- **ExplainabilityLayer** — per-finding breakdown of which dimensions drove the confidence verdict
+- **MetaLearner** — unified facade; all models persist cross-session in `KnowledgeBase` (SQLite)
+
+### Detection intelligence
 - **ThreatModelEngine** — per-endpoint threat score drives hypothesis depth (`SHALLOW` / `MEDIUM` / `DEEP`)
 - **InvariantStore** — inductively learns invariants from baseline traffic; flags any violation
 - **TemporalAnomalyDetector** — detects blind injection (SQLi, SSTI, CMDI) purely via response time (baseline p95 + automatic escalation)
-
-### Exploit engine
-- **1 040 YAML exploit strategies** — 100 per OWASP category A01–A10, executed after a finding is confirmed to generate machine-readable proof-of-concept
-- **15+ inject types** — covers every parameter location (path, query, body, header, cookie, JSON key, XML attribute, GraphQL variable)
-- **Encoding pipeline** — chains URL encoding, Unicode escaping, Base64, null-byte insertion, and more
-- **AdaptivePayloadEngine** — detects WAF presence from responses and selects a bypass strategy automatically
-- **BypassRegistry** — 15 transport/protocol bypass strategies: chunked encoding, case variation, header insertion, multipart abuse, etc.; 7 recognized WAF signatures
+- **AmbiguityResolver** — uses LLM context (when configured) to resolve inconclusive verdicts
 
 ### Infrastructure
 - **Integrated MITM proxy** — auto-generated CA certificate, one-command browser installation (`hdwp install-ca`)
-- **Real-time web UI** — React 19 dashboard with INTEL tab (live signal stream over WebSocket)
-- **REST API server** — 40+ FastAPI endpoints; full programmatic control of scans, plugins, strategies, reports, and the proxy
+- **Native desktop UI** — pywebview window (React 19 dashboard), INTEL tab (live signal stream over WebSocket), one-click JSON export to disk
+- **REST API server** — FastAPI; full programmatic control of scans, plugins, reports, and the proxy
 - **Tor opt-in** — direct connection by default; Tor enabled via `tor_proxy` in context or `--proxy` CLI flag
 - **HAR, Markdown, and JSON reports** — machine-readable and human-readable output formats
 
@@ -297,7 +386,7 @@ Offline mode supported — query a local JSON database instead of the live OSV.d
 | `identity_swap` | A01 | Replaces auth credentials with a different role's — tests horizontal access control |
 | `object_ref_change` | A01 | Changes an ID parameter to another object's reference — tests BOLA/IDOR |
 | `privilege_escalation` | A01 | Accesses a restricted endpoint with low-privilege credentials |
-| `field_injection` | A03 | Injects a payload string into any parameter location |
+| `field_injection` | A03 | Injects a probe string into any parameter location |
 | `jwt_manipulation` | A02 | Forges JWT with `alg:none`, expired timestamp, or weak secret |
 | `origin_test` | A05 | Adds `Origin: https://evil.hdwp-test.invalid` to test CORS policy |
 | `race_condition` | A04 | TemporalModule fires concurrent copies of the request |
@@ -330,14 +419,13 @@ Offline mode supported — query a local JSON database instead of the live OSV.d
 
 ## Attack Chains
 
-The `AttackGraphPlanner` runs an A\* search over confirmed findings to plan and execute multi-step attack chains. It activates automatically when two or more findings are confirmed.
+The `AttackGraphPlanner` runs an A\* search over confirmed findings to plan multi-step attack chains. It activates automatically when two or more findings are confirmed.
 
 **How it works:**
 1. Each confirmed `Finding` is converted to an `AttackTransition` encoding its effects (credentials obtained, objects readable/writable, privileges granted, tokens held)
 2. Backward-reachability pruning eliminates transitions irrelevant to the target goal
 3. A\* search (max 2000 nodes, max chain length 5 steps) finds the minimum-cost path from the current attacker state to the goal
-4. Each step in the found chain is executed via the experiment engine; the actual reached state is tracked
-5. A successful chain produces a `HIGH` severity finding with 0.85 confidence and emits `GOAL_REACHED`
+4. A successful chain produces a `HIGH` severity finding with 0.85 confidence and emits `GOAL_REACHED`
 
 **Three built-in goals:**
 
@@ -346,8 +434,6 @@ The `AttackGraphPlanner` runs an A\* search over confirmed findings to plan and 
 | `ACCOUNT_TAKEOVER` | Obtain another user's credentials and impersonate them |
 | `DATA_EXFILTRATION` | Read sensitive data not accessible to the attacker |
 | `PRIVILEGE_ESCALATION` | Escalate from a low-privilege role to admin or higher |
-
-Chains are also available via the API: `GET /api/chain/candidates` (enumerate all reachable chains) and `POST /api/chain/run` (execute a specific chain).
 
 ---
 
@@ -358,18 +444,11 @@ Chains are also available via the API: `GET /api/chain/candidates` (enumerate al
 Download the pre-built binary from the [latest release](https://github.com/devmail0561-web/hdwp/releases/latest). No Python required. Works on any Linux x86-64 system.
 
 ```bash
-# Download
 curl -LO https://github.com/devmail0561-web/hdwp/releases/latest/download/hdwp
 chmod +x hdwp
-
-# Verify integrity (SHA-256 is listed on the release page)
-sha256sum hdwp
-
-# Run
+sha256sum hdwp  # verify against the release page
 ./hdwp --help
 ```
-
-The binary bundles Python 3.12, all dependencies, 1 040 YAML exploit strategies, 38 plugins, and the React dashboard (~230 MB).
 
 ### Option 2 — From source
 
@@ -400,6 +479,9 @@ pip install -e ".[llm]"
 
 # With MITM proxy (mitmproxy backend)
 pip install -e ".[proxy]"
+
+# With gRPC support
+pip install -e ".[grpc]"
 ```
 
 ### Option 3 — Rebuild the binary yourself
@@ -499,18 +581,16 @@ hdwp install-ca --verbose
 
 ## API Server
 
-When launched, HDWP starts a FastAPI server with 40+ REST endpoints and a WebSocket event stream. The full interactive API documentation is available at [`/api/docs`](http://127.0.0.1:7007/api/docs) once the engine is running.
+When launched, HDWP starts a FastAPI server with REST endpoints and a WebSocket event stream. The full interactive API documentation is available at [`/api/docs`](http://127.0.0.1:7007/api/docs) once the engine is running.
 
 | Group | Endpoints |
 |---|---|
 | **State** | `GET /api/health` · `GET /api/state` |
 | **Sessions** | `POST /api/session/new` · `GET /api/sessions` · `POST /api/session/{id}/resume` · `DELETE /api/session/{id}` |
 | **Scan** | `POST /api/scan/start` · `POST /api/scan/stop` |
-| **Findings** | `GET /api/findings` |
+| **Findings** | `GET /api/findings` · `POST /api/findings/export` |
 | **Plugins** | `GET /api/plugins` · `POST /api/plugins/toggle` · `POST /api/plugins/scaffold` · `POST /api/plugins/reload` |
-| **Strategies** | `GET /api/strategies` · `POST /api/strategies/toggle` · `POST /api/strategies/scaffold` |
-| **Exploit** | `POST /api/exploit/run/{finding_id}` · `GET /api/exploit/action/{finding_id}` · `GET /api/exploit/demo/{finding_id}` |
-| **Attack chains** | `POST /api/chain/run` · `GET /api/chain/findings` · `GET /api/chain/candidates` |
+| **Attack chains** | `GET /api/chain/findings` · `GET /api/chain/candidates` |
 | **Report** | `POST /api/report/generate` · `GET /api/report/default-dir` |
 | **Proxy** | `POST /api/proxy/start` · `POST /api/proxy/stop` · `GET /api/proxy/ca-cert` · `POST /api/proxy/install-ca` |
 | **Knowledge** | `GET /api/knowledge/stats` · `GET /api/knowledge/learning-health` · `POST /api/knowledge/reset` |
@@ -523,8 +603,8 @@ When launched, HDWP starts a FastAPI server with 40+ REST endpoints and a WebSoc
 
 | Format | Flag | Output | Use case |
 |---|---|---|---|
-| **Markdown** | `--format md` | Single `.md` file | Human-readable penetration test report — findings grouped by severity, OWASP/CWE references, reproduction steps, remediations. Optional LLM-generated executive summary. |
-| **JSON** | `--format json` | `findings.json` + `summary.json` | Machine-readable output for SIEM integration, ticketing systems, or custom dashboards. |
+| **Markdown** | `--format md` | Single `.md` file | Human-readable penetration test report — findings grouped by severity, OWASP/CWE references, reproduction steps, confidence breakdown, remediations. Optional LLM-generated executive summary. |
+| **JSON** | `--format json` | `findings.json` + `summary.json` | Machine-readable output for SIEM integration, ticketing systems, or custom dashboards. Also available from the UI via the `[ EXPORTER JSON ]` button (saves to `~/Bureau/`). |
 | **HAR** | `--format har` | One `.har` per finding | HTTP Archive format — import directly into Burp Suite or browser DevTools for manual verification and replay. |
 
 ---
@@ -538,6 +618,8 @@ OBSERVE     → BFS crawl (HTML, forms, JS fetch/axios/XHR/WebSocket, HATEOAS JS
               + OPTIONS probing per path
               + POST/PUT/PATCH probing per GET endpoint
               + SPA browser crawl (Playwright via MITM proxy)
+              + WsObserver (WebSocket endpoint discovery + traffic capture)
+              + GrpcObserver (service reflection + method enumeration)
               + Version fingerprinting → OSV.dev CVE lookup (JS + 9 backend frameworks)
 
 MODEL       → EndpointNode, ParameterNode (semantic type, sensitivity)
@@ -547,24 +629,29 @@ MODEL       → EndpointNode, ParameterNode (semantic type, sensitivity)
 
 INFER       → 38 SecurityProperty derivations from the semantic graph
 
-HYPOTHESIZE → ContextualHypothesisEngine
-              depth: SHALLOW / MEDIUM / DEEP (driven by threat score)
+PRIORITIZE  → MetaLearner.sort_hypotheses()
+              PayloadOptimizer (Thompson Sampling: fingerprint × mutation_type)
+              HypothesisBandit (UCB1: property_type × mutation_type)
+              ActiveLearner (promotes uncertain hypotheses)
+              VulnClassifier (per-endpoint mutation focus)
 
 EXPERIMENT  → baseline request + 31 mutation types
-              + PayloadDatabase (14 YAML payload files, 1040 strategies)
               + Encoding pipeline (URL, Unicode, Base64, null bytes, …)
-              + AdaptivePayloadEngine (WAF detection → bypass strategy selection)
-              + BypassRegistry (15 transport/protocol bypass strategies)
+              + BypassRegistry (15 transport/protocol bypass strategies, 7 WAF signatures)
+              + WsInjector / GrpcInjector for non-HTTP protocols
 
 ORACLE      → SemanticDiff (data_identity_score, structural diff, value diff)
               + Z-score anomaly, size ratio, field entropy
               + CrossRoleDiffEngine (STRUCTURAL / VALUE / IDENTITY)
               + TemporalAnomalyDetector (blind injection via response time)
-              + ConfidenceModelV2 (10 dimensions) + ExplainabilityLayer
+              + InjectionOracle (XSS reflection, SSTI evaluation, SQLi pattern)
+              + ConfidenceModelV2 (10 dimensions)
+              + OracleModel (scikit-learn classifier)
+              + ExplainabilityLayer (per-finding contribution breakdown)
+              → Finding (CONFIRMED / REFUTED / AMBIGUOUS → AmbiguityResolver)
 
-EXPLOIT     → 1040 YAML strategies (A01–A10) + multi-phase network engine
-              + 15+ inject types + auto-generated HTML PoCs
-              + HAR evidence capture per finding
+LEARN       → FeedbackLoop updates ConfidenceModelV2 weights
+              MetaLearner.persist() saves all model states to KnowledgeBase
 
 CHAIN       → AttackGraphPlanner (A* multi-step on AttackState)
               goals: ACCOUNT_TAKEOVER, DATA_EXFILTRATION, PRIVILEGE_ESCALATION
@@ -579,5 +666,3 @@ REPORT      → Markdown / JSON / HAR
 ## License
 
 MIT — Copyright (c) 2026 M. TENDENG
-
-See [LICENSE](LICENSE) for details.

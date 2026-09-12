@@ -5,7 +5,6 @@ import type {
   CrossRoleDiff,
   TemporalAnomaly,
   WafSignature,
-  PayloadAdapted,
   GoalReached,
   PreconditionMissing,
 } from '../types/hdwp'
@@ -20,7 +19,6 @@ interface V3Store {
   crossRoleDiffs: CrossRoleDiff[]
   temporalAnomalies: TemporalAnomaly[]
   wafSignatures: WafSignature[]
-  payloadsAdapted: PayloadAdapted[]
   goalsReached: GoalReached[]
   preconditionsMissing: PreconditionMissing[]
   setThreatModel(p: ThreatModelUpdated): void
@@ -28,7 +26,6 @@ interface V3Store {
   addCrossRoleDiff(e: CrossRoleDiff): void
   addTemporalAnomaly(e: TemporalAnomaly): void
   addWafSignature(e: WafSignature): void
-  addPayloadAdapted(e: PayloadAdapted): void
   addGoalReached(e: GoalReached): void
   addPreconditionMissing(e: PreconditionMissing): void
   reset(): void
@@ -42,7 +39,6 @@ export const useV3Store = create<V3Store>((set) => ({
   crossRoleDiffs: [],
   temporalAnomalies: [],
   wafSignatures: [],
-  payloadsAdapted: [],
   goalsReached: [],
   preconditionsMissing: [],
 
@@ -64,9 +60,6 @@ export const useV3Store = create<V3Store>((set) => ({
   addWafSignature: (e) => set((s) => ({
     wafSignatures: [...s.wafSignatures.slice(-(MAX_V3 - 1)), e],
   })),
-  addPayloadAdapted: (e) => set((s) => ({
-    payloadsAdapted: [...s.payloadsAdapted.slice(-(MAX_V3 - 1)), e],
-  })),
   addGoalReached: (e) => set((s) => ({
     goalsReached: [...s.goalsReached.slice(-(MAX_V3 - 1)), e],
   })),
@@ -82,7 +75,6 @@ export const useV3Store = create<V3Store>((set) => ({
     crossRoleDiffs: [],
     temporalAnomalies: [],
     wafSignatures: [],
-    payloadsAdapted: [],
     goalsReached: [],
     preconditionsMissing: [],
   }),

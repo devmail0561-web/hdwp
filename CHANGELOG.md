@@ -6,6 +6,60 @@ Versionnage : [SemVer](https://semver.org/lang/fr/)
 
 ---
 
+## [4.4.0] — 2026-09-12 — Export natif, API findings ouverte, UI pywebview
+
+### Export findings server-side
+
+**Ajoutés**
+- `POST /api/findings/export` — écrit `hdwp-findings-YYYY-MM-DD.json` sur le Bureau de l'utilisateur et renvoie `{ path, count }`
+- Bouton `[ EXPORTER JSON ]` : appel backend + feedback visuel (chemin du fichier affiché 5 secondes en vert)
+
+**Modifiés**
+- `GET /api/findings` — filtre `status="CONFIRMED"` retiré, renvoie désormais tous les findings (CONFIRMED, SUSPECTED, PENDING)
+- `findingsStore.ts` — erreurs fetch loggées dans la console au lieu d'être avalées silencieusement
+- `FindingsTab.tsx` — export via `fetch POST` au lieu de `window.open`/`<a>.click()` (incompatible pywebview natif)
+
+### Documentation
+- `README.md` — table API enrichie (`POST /api/findings/export`), "Native desktop UI (pywebview)", mention export UI dans les formats de rapport
+- `PROGRESS.md` — ligne "Export JSON natif" ajoutée, `AdaptivePayloadEngine` marqué supprimé
+
+---
+
+## [4.3.0] — 2026-09-12 — Suppression couche exploit, moteur finding-only
+
+### Moteur recentré sur la détection de findings
+
+**Supprimés**
+- `core/exploit/` — module complet (stratégies YAML, `StrategyRegistry`, `ScriptRunner`, `output_parsers`)
+- `core/experiment/adaptive_payload.py` — `AdaptivePayloadEngine` (WAF bypass adaptatif post-scan)
+- `store/payload_database.py` — base de données de payloads d'exploitation
+- Routes serveur : `exploit.py`, `payload.py`, `script.py`, `strategies.py`
+- UI : `ExploitTab`, `PayloadTab`, `StrategiesTab` + `strategiesStore.ts`
+- 7 fichiers de tests exploit/payload
+
+**Modifiés**
+- `engine.py` — retrait des blocs `PayloadDatabase`, `ExploitRegistry`, `AdaptivePayloadEngine`
+- `oracle/engine.py` — retrait de `_on_payload_adapted()` et subscription `PAYLOAD_ADAPTED`
+- `bus/events.py` — événement `PAYLOAD_ADAPTED` supprimé
+- `plugins/registry.py` — injection `PayloadDatabase` et `register_output_parsers()` supprimés
+- `plugins/base.py` — méthode `register_output_parsers()` supprimée
+- Plugins injection (cmdi, xss, sqli, ssti) — dépendance `PayloadDatabase` retirée, probes legacy utilisées directement
+- `config_schema.py` — `ExploitStrategyConfig` et champ `exploit_strategies` supprimés
+- `paths.py` — constantes `EXPLOIT_STRATEGIES_DIR` / `EXPLOIT_STRATEGIES_CONFIG` supprimées
+- Tests gRPC — mock `AsyncMock` → `MagicMock` pour `unary_unary` (correctif de chaîne d'appel)
+- `test_proxy_capture.py` — retrait du test "mitmproxy absent" (inapplicable en env dev)
+
+**Export findings**
+- `POST /api/findings/export` — écrit le JSON sur le Bureau (`~/Bureau/hdwp-findings-YYYY-MM-DD.json`) et renvoie le chemin
+- Bouton `[ EXPORTER JSON ]` dans l'onglet Findings : appel backend + feedback visuel (chemin affiché 5s)
+- Ancien mécanisme `window.open` / `<a>.click()` supprimé (incompatible pywebview)
+- `GET /api/findings` : filtre `status=CONFIRMED` retiré — renvoie tous les findings
+- `findingsStore.ts` : erreurs fetch loggées au lieu d'être avalées silencieusement
+
+**Résultat** : 1260 tests, 0 skipped. Le moteur produit uniquement des findings.
+
+---
+
 ## [4.2.0-dev] — 2026-09-11 — WebSocket/gRPC, calibration ML, CI stabilisée
 
 ### Couverture protocoles WebSocket & gRPC (Action 9)

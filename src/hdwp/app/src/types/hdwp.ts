@@ -49,32 +49,6 @@ export interface Finding {
   proof?: Record<string, unknown>
 }
 
-export interface PayloadFinding extends Finding {
-  has_replay: boolean
-  replay_type: 'passive' | 'experiment' | 'none'
-  proof: Record<string, unknown>
-}
-
-export interface ExploitRelatedFinding {
-  id: string
-  cwe_id: string
-  severity: string
-  endpoint: string
-}
-
-export interface ExploitResult {
-  finding_id: string
-  vuln_type: string
-  status: 'success' | 'partial' | 'not_implemented' | 'failed'
-  impact_evidence: Record<string, unknown> | null
-  request_used: Record<string, unknown> | null
-  elapsed_ms: number
-  note: string
-  impact_description?: string
-  attack_scenarios?: string[]
-  related_findings?: ExploitRelatedFinding[]
-}
-
 export interface StateResponse {
   status: string
   session_id: string
@@ -116,19 +90,6 @@ export interface Plugin {
   owasp_mapping: string[]
   cwe_mapping: string[]
   data_access: string
-}
-
-export interface Strategy {
-  id: string
-  name: string
-  vuln_type: string
-  description: string
-  source: string
-  proof_type: string
-  tech_stack: string[]
-  params: Record<string, unknown>
-  phases_count: number
-  enabled: boolean
 }
 
 export interface BehavioralProfile {
@@ -220,49 +181,6 @@ export interface ManualToken {
   token_value: string
 }
 
-export interface ChainCandidate {
-  chain_type: string
-  description: string
-  precondition_finding_ids: string[]
-  executable: boolean
-  missing_preconditions: string[]
-}
-
-export interface ChainFinding {
-  id: string
-  chain_type: string
-  trigger_finding_ids: string[]
-  severity: string
-  confidence: number
-  proof: Record<string, unknown>
-}
-
-export interface ScriptTemplate {
-  name: string
-  path: string
-  type: 'py' | 'sh' | 'js'
-  description: string
-}
-
-export interface ScriptResult {
-  success: boolean
-  stdout: string
-  stderr: string
-  exit_code: number
-  elapsed_ms: number
-}
-
-export interface ExploitAction {
-  finding_id: string
-  action_type: 'demo_page' | 'payload_url' | 'html_form' | 'click_link' | 'copy_payload'
-  title: string
-  description: string
-  payload: string
-  demo_url: string | null
-  instructions: string[]
-  copy_ready: boolean
-}
-
 // ── V3 event payload interfaces ───────────────────────────────────────────────
 
 export interface ThreatModelUpdated {
@@ -309,12 +227,6 @@ export interface WafSignature {
   bypass_strategies: string[]
   hypothesis_id: string
 }
-
-export interface PayloadAdaptedBlocked  { signal_type: 'BLOCKED';          adaptation: 'waf_bypass';          endpoint: string; waf_type: string; strategies: { name: string; transform: string }[]; hypothesis_id: string }
-export interface PayloadAdaptedError    { signal_type: 'ERROR';            adaptation: 'error_refinement';    endpoint: string; db_hints: Record<string, string>; hypothesis_id: string }
-export interface PayloadAdaptedTiming   { signal_type: 'TIMING_ANOMALY';   adaptation: 'timing_escalation';   endpoint: string; timing_ms: number; baseline_ms: number; hypothesis_id: string }
-export interface PayloadAdaptedField    { signal_type: 'UNEXPECTED_FIELD'; adaptation: 'field_investigation'; endpoint: string; hypothesis_id: string }
-export type PayloadAdapted = PayloadAdaptedBlocked | PayloadAdaptedError | PayloadAdaptedTiming | PayloadAdaptedField
 
 export interface GoalReached {
   goal_type: string

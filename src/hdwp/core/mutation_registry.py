@@ -125,6 +125,25 @@ def _lazy_specificity(
 
 _MUTATIONS: dict[str, MutationSpec] = {}
 
+# payload_type sub-registry: field_injection reuses one mutation_type for many
+# injection classes (xss, sqli, cmdi…) distinguished only by payload_type in
+# mutation_params. This registry maps payload_type → (owasp_category, cwe_id).
+_PAYLOAD_TYPE_CWES: dict[str, tuple[str, str]] = {}
+
+
+def register_payload_type_cwe(payload_type: str, owasp_category: str, cwe_id: str) -> None:
+    """Register the (owasp, cwe) override for a specific payload_type value.
+
+    Plugins that reuse field_injection with a custom payload_type should call
+    this so that oracle findings carry the correct CWE instead of CWE-89.
+    """
+    _PAYLOAD_TYPE_CWES[payload_type] = (owasp_category, cwe_id)
+
+
+def owasp_cwe_for_payload(payload_type: str) -> tuple[str, str] | None:
+    """Return (owasp_category, cwe_id) for a payload_type, or None if unknown."""
+    return _PAYLOAD_TYPE_CWES.get(payload_type)
+
 
 def register(
     name: str,
@@ -442,6 +461,28 @@ def _register_builtins() -> None:
             register(**meta)  # type: ignore[arg-type]
         except Exception as exc:  # noqa: BLE001
             log.warning("mutation.builtin_register_failed", name=meta.get("name"), error=str(exc))
+
+    # Payload-type CWE overrides for field_injection sub-classes.
+    # Each entry mirrors the cwe_mapping declared by the corresponding plugin.
+    _pt_cwes: list[tuple[str, str, str]] = [
+        ("xss",                 "A03:2021", "CWE-79"),
+        ("sqli",                "A03:2021", "CWE-89"),
+        ("sqli_probe",          "A03:2021", "CWE-89"),
+        ("cmdi",                "A03:2021", "CWE-78"),
+        ("ssti",                "A03:2021", "CWE-94"),
+        ("nosqli",              "A03:2021", "CWE-943"),
+        ("path_traversal",      "A01:2021", "CWE-22"),
+        ("deserialization",     "A08:2021", "CWE-502"),
+        ("ldap",                "A03:2021", "CWE-90"),
+        ("xpath",               "A03:2021", "CWE-643"),
+        ("crlf",                "A03:2021", "CWE-113"),
+        ("el_injection",        "A03:2021", "CWE-917"),
+        ("prototype_pollution", "A03:2021", "CWE-1321"),
+        ("open_redirect",       "A01:2021", "CWE-601"),
+        ("xxe",                 "A05:2021", "CWE-611"),
+    ]
+    for pt, owasp, cwe in _pt_cwes:
+        register_payload_type_cwe(pt, owasp, cwe)
 
     # Enrichissement avec plan/apply : chaque mutation isolée pour résilience.
     _plan_mod = None

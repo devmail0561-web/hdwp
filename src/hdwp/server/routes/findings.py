@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from datetime import date
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 
 from hdwp.server.models.finding import ConfidenceBreakdown, FindingResponse
@@ -15,7 +18,7 @@ async def list_findings(request: Request) -> list[FindingResponse]:
     session = request.app.state.server_state.get_active()
     if not session or not session.repository:
         return []
-    findings = await session.repository.list_findings(status="CONFIRMED")
+    findings = await session.repository.list_findings()
     result = []
     for f in findings:
         cb = f.confidence_breakdown
@@ -42,3 +45,34 @@ async def list_findings(request: Request) -> list[FindingResponse]:
             proof=f.proof if isinstance(f.proof, dict) else {},
         ))
     return result
+
+
+@router.post("/findings/export")
+async def export_findings(request: Request) -> dict:
+    import json
+
+    session = request.app.state.server_state.get_active()
+    rows: list[dict] = []
+    if session and session.repository:
+        for f in await session.repository.list_findings():
+            rows.append({
+                "id": f.id,
+                "hypothesis_id": f.hypothesis_id,
+                "property_id": f.property_id,
+                "status": f.status,
+                "severity": f.severity,
+                "confidence": f.confidence,
+                "owasp_category": f.owasp_category,
+                "cwe_id": f.cwe_id,
+                "affected_endpoints": f.affected_endpoints,
+                "remediation_hint": f.remediation_hint,
+            })
+    filename = f"hdwp-findings-{date.today().isoformat()}.json"
+    desktop = Path.home() / "Bureau"
+    if not desktop.exists():
+        desktop = Path.home() / "Desktop"
+    if not desktop.exists():
+        desktop = Path.home()
+    out = desktop / filename
+    out.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"path": str(out), "count": len(rows)}

@@ -53,8 +53,6 @@ async def get_state(request: Request) -> StateResponse:
                 all_invs = session.engine._invariant_store.all_invariants()
                 invariant_count = len(all_invs)
                 invariant_violation_count = sum(inv.violation_count for inv in all_invs)
-            if getattr(session.engine, "_adaptive_payload_engine", None) is not None:
-                waf_detected = bool(session.engine._adaptive_payload_engine.detected_wafs)
         except Exception:
             pass
 

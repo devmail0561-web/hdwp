@@ -1,6 +1,6 @@
 # Progression de l'implémentation — HDWP Engine
 
-Dernière mise à jour : 2026-09-08
+Dernière mise à jour : 2026-09-12
 
 ---
 
@@ -33,9 +33,12 @@ V4 Sprint 8 FeedbackLoop Phase 7      [DONE] ███████████�
 V4 Sprint 9 CrossSessionTransfer      [DONE] ████████████████████ 100%
 V4 Sprint 10 MetaLearner              [DONE] ████████████████████ 100%
 V4 Sprint 11 ExplainabilityLayer      [DONE] ████████████████████ 100%
+V3 Sprint 1  WebSocket/gRPC + calibration ML [DONE] ████████████████████ 100%
+Refonte moteur (finding-only, sans exploit) [DONE] ████████████████████ 100%
+Export JSON natif (pywebview, server-side)  [DONE] ████████████████████ 100%
 ```
 
-**Version : 4.0.0-sprint11** | Fichiers source Python : ~120 | Composants TypeScript : 12 stores/hooks/composants v3
+**Version : 4.4.0** | Tests : 1260 passing, 0 skipped | Plugins : 38 | Mutations : 31
 
 ---
 
@@ -51,7 +54,7 @@ V4 Sprint 11 ExplainabilityLayer      [DONE] ███████████�
 | ContextualHypothesisEngine | `core/reasoning/layer.py` | — |
 | CrossRoleDiffEngine | `core/oracle/crossrole_diff.py` | `crossrole.diff.confirmed` |
 | TemporalAnomalyDetector | `core/oracle/temporal_detector.py` | `temporal.anomaly.detected` |
-| AdaptivePayloadEngine | `core/experiment/adaptive_payload.py` | `payload.adapted`, `waf.signature.detected` |
+| ~~AdaptivePayloadEngine~~ | ~~`core/experiment/adaptive_payload.py`~~ | *(supprimé v4.3.0-dev)* |
 | WAFDialogEngine | `core/experiment/waf_dialog.py` | — |
 | AttackGraphPlanner (A*) | `core/attack_graph/planner.py` | `goal.reached` |
 | PreconditionSolver | `core/attack_graph/precondition_solver.py` | `precondition.missing` |

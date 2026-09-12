@@ -20,6 +20,7 @@ from hdwp.core.context.config_schema import (
 )
 from hdwp.core.context.loader import EngineContext
 from hdwp.core.observation.openapi_seeder import (
+    _extract_request_params,
     _infer_response_body,
     _schema_to_example,
     seed_from_openapi,
@@ -251,3 +252,100 @@ async def test_security_requirement_emits_401_for_anonymous() -> None:
     auth_obs = [e for e in received if "user_a" in str(e.payload.get("tags", []))]
     assert len(auth_obs) == 1
     assert auth_obs[0].payload["response"]["status_code"] == 200
+
+
+def test_extract_request_params_query() -> None:
+    path_item: dict = {}
+    operation = {
+        "parameters": [
+            {"in": "query", "name": "search", "schema": {"type": "string"}},
+            {"in": "query", "name": "page", "schema": {"type": "integer"}},
+            {"in": "path", "name": "id", "schema": {"type": "string"}},
+        ]
+    }
+    query_params, req_body = _extract_request_params(path_item, operation)
+    assert "search" in query_params
+    assert "page" in query_params
+    assert "id" not in query_params, "path params ne doivent pas être dans query_params"
+    assert req_body is None
+
+
+def test_extract_request_params_body() -> None:
+    path_item: dict = {}
+    operation = {
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "email": {"type": "string"},
+                            "password": {"type": "string"},
+                        },
+                    }
+                }
+            }
+        }
+    }
+    query_params, req_body = _extract_request_params(path_item, operation)
+    assert query_params == {}
+    assert isinstance(req_body, dict)
+    assert "email" in req_body
+    assert "password" in req_body
+
+
+@pytest.mark.asyncio
+async def test_seed_manual_endpoints_no_params() -> None:
+    context = _make_context(seed_endpoints=["/api/users"])
+    bus = AsyncEventBus()
+    received = []
+
+    async def handler(e):
+        received.append(e)
+
+    bus.on(OBSERVATION_RAW, handler)
+    await seed_from_openapi(bus, context)
+    await bus.drain()
+
+    assert len(received) > 0
+    for obs in received:
+        req = obs.payload["request"]
+        assert req["query_params"] == {}, "manual endpoints ne doivent pas avoir de query_params"
+        assert req["body"] is None, "manual endpoints ne doivent pas avoir de body"
+
+
+@pytest.mark.asyncio
+async def test_seed_from_spec_includes_query_params() -> None:
+    spec = {
+        "openapi": "3.0.0",
+        "paths": {
+            "/api/search": {
+                "get": {
+                    "parameters": [
+                        {"in": "query", "name": "q", "schema": {"type": "string"}},
+                    ],
+                    "responses": {"200": {}},
+                }
+            }
+        },
+    }
+    context = _make_context(openapi_spec="/fake/spec.json")
+    bus = AsyncEventBus()
+    received = []
+
+    async def handler(e):
+        received.append(e)
+
+    bus.on(OBSERVATION_RAW, handler)
+    with patch(
+        "hdwp.core.observation.openapi_seeder._load_spec",
+        new_callable=AsyncMock,
+        return_value=spec,
+    ):
+        await seed_from_openapi(bus, context)
+    await bus.drain()
+
+    assert len(received) > 0
+    for obs in received:
+        req = obs.payload["request"]
+        assert "q" in req["query_params"], "query param 'q' doit être présent dans la requête synthétique"

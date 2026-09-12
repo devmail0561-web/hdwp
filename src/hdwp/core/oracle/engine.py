@@ -33,7 +33,6 @@ from hdwp.core.bus.events import (
     HYPOTHESIS_STATUS_CHANGED,
     INVARIANT_VIOLATED,
     ML_ORACLE_VERDICT,
-    PAYLOAD_ADAPTED,
     TEMPORAL_ANOMALY_DETECTED,
     HDWPEvent,
 )
@@ -106,7 +105,6 @@ class SemanticOracle:
         bus.on(TEMPORAL_ANOMALY_DETECTED, self._on_temporal_anomaly)
         bus.on(CROSSROLE_DIFF_CONFIRMED, self._on_crossrole_diff)
         bus.on(INVARIANT_VIOLATED, self._on_invariant_violated)
-        bus.on(PAYLOAD_ADAPTED, self._on_payload_adapted)
 
     async def _on_experiment_result(self, event: HDWPEvent) -> None:
         data = event.payload
@@ -157,16 +155,6 @@ class SemanticOracle:
         if raw:
             ep = _extract_endpoint(raw)
             self._invariant_signals[ep] = 1.0
-
-    async def _on_payload_adapted(self, event: HDWPEvent) -> None:
-        data = event.payload
-        if not isinstance(data, dict):
-            return
-        hyp_id = data.get("hypothesis_id", "")
-        # Clé "endpoint" (pas "endpoint_path") — vérifié dans adaptive_payload.py
-        adaptation = data.get("adaptation", "")
-        if hyp_id and adaptation == "waf_bypass":
-            self._waf_bypass_attempted.add(hyp_id)
 
     @property
     def oracle_ml_model(self) -> Any:
@@ -576,6 +564,7 @@ class SemanticOracle:
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _build_finding(
     hyp_id: str,
     score: ConfidenceScore,
@@ -598,6 +587,12 @@ def _build_finding(
 
     winning = winning_experiment or baseline
     owasp, cwe = owasp_cwe(mutation_type)
+    payload_type = baseline.experiment_spec.mutation_params.get("payload_type", "")
+    if payload_type:
+        from hdwp.core.mutation_registry import owasp_cwe_for_payload
+        override = owasp_cwe_for_payload(payload_type)
+        if override:
+            owasp, cwe = override
 
     explanation = None
     if v3_signals is not None and confidence_v2 is not None:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useFindingsStore } from '../stores/findingsStore'
 import { useScanStore } from '../stores/scanStore'
 import type { Finding } from '../types/hdwp'
@@ -155,15 +155,20 @@ export function FindingsTab() {
   }, [status, fetchFindings])
 
   const selected = findings.find(f => f.id === selectedId) ?? null
+  const [exportMsg, setExportMsg] = useState('')
+  const exportTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
-  const handleExport = () => {
-    const blob = new Blob([JSON.stringify(findings, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `hdwp-findings-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+  const handleExport = async () => {
+    setExportMsg('Export en cours...')
+    try {
+      const r = await fetch('/api/findings/export', { method: 'POST' })
+      const data = await r.json()
+      setExportMsg(`${data.count} findings → ${data.path}`)
+    } catch {
+      setExportMsg('Erreur export')
+    }
+    clearTimeout(exportTimer.current)
+    exportTimer.current = setTimeout(() => setExportMsg(''), 5000)
   }
 
   return (
@@ -207,18 +212,22 @@ export function FindingsTab() {
         padding: '5px 10px', borderTop: '1px solid var(--border)',
         background: 'var(--bg-input)', flexShrink: 0,
       }}>
-        <button
-          onClick={handleExport}
-          disabled={findings.length === 0}
-          style={{
-            background: 'transparent', border: '1px solid var(--green-dark)',
-            color: findings.length > 0 ? 'var(--green)' : 'var(--green-dark)',
-            fontFamily: 'var(--font-title)', fontSize: 9, letterSpacing: 2,
-            padding: '4px 14px', cursor: findings.length > 0 ? 'pointer' : 'default',
-          }}
-        >
-          [ EXPORTER JSON ]
-        </button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={handleExport}
+            style={{
+              background: exportMsg ? '#0a2a0a' : 'transparent',
+              border: `1px solid ${exportMsg ? 'var(--green)' : 'var(--green-dark)'}`,
+              color: exportMsg ? '#44ff88' : 'var(--green)',
+              fontFamily: 'var(--font-title)', fontSize: 9, letterSpacing: 2,
+              padding: '4px 14px', cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            [ EXPORTER JSON ]
+          </button>
+          {exportMsg && <span style={{ fontSize: 9, color: '#44ff88' }}>{exportMsg}</span>}
+        </span>
         <button
           onClick={fetchFindings}
           style={{

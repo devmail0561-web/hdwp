@@ -3,4 +3,4 @@
 
 """HDWP Engine -- Hypothesis-Driven Web Pentesting Engine."""
 
-__version__ = "0.1.0"
+__version__ = "4.4.0"

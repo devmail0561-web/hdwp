@@ -193,13 +193,6 @@ class HDWPEngine:
         registry = PluginRegistry()
         registry.discover()
 
-        # Phase 0.1: Initialize PayloadDatabase singleton before plugin enabling
-        from hdwp.store.payload_database import get_payload_database
-        payload_db = get_payload_database()
-        payload_db.load_all()
-        log.info("engine.payload_database_loaded",
-                 plugins_with_payloads=payload_db.get_loaded_plugins())
-
         disabled_ids = set(context.config.plugins.disabled)
         if plugin_ids:
             for pid in plugin_ids:
@@ -219,11 +212,6 @@ class HDWPEngine:
             for p in registry.list_all():
                 if p.id not in disabled_ids:
                     registry.enable(p.id)
-
-        # Stratégies d'exploit : copie légère par session pour éviter la mutation du singleton partagé
-        from hdwp.core.exploit.strategy_registry import StrategyRegistry as _ExploitRegistry, _default_registry as _builtin_exploit_registry
-        _exploit_registry = _ExploitRegistry._make_session_copy(_builtin_exploit_registry)
-        _exploit_registry.apply_mission_config(context.config.exploit_strategies)
 
         # Enregistrer les mutations custom des plugins
         from hdwp.core import mutation_registry
@@ -391,11 +379,6 @@ class HDWPEngine:
             max_concurrent=context.config.options.max_concurrent_experiments,
         )
 
-        # V3 AdaptivePayloadEngine: real-time signal classification + WAF bypass
-        from hdwp.core.experiment.adaptive_payload import AdaptivePayloadEngine
-
-        adaptive_engine = AdaptivePayloadEngine(bus)
-
         engine = cls(
             context=context,
             bus=bus,
@@ -411,11 +394,9 @@ class HDWPEngine:
             prop_engine=prop_engine,
             llm_layer=llm_layer,
         )
-        engine._adaptive_payload_engine = adaptive_engine
         engine._threat_engine = threat_engine
         engine._invariant_store = invariant_store
         engine._prioritizer = prioritizer
-        engine._exploit_registry = _exploit_registry
         # V4 Sprint 10 : MetaLearner remplace les refs individuelles ML
         engine._ml = ml
         engine._target_hash = _target_hash
@@ -500,6 +481,7 @@ class HDWPEngine:
             await self._bus.drain()
 
         # Phase 1b : crawl actif
+        self._obs_engine._model_accessor = self._app_model.snapshot
         await self._obs_engine.start()
         await self._bus.drain()
 

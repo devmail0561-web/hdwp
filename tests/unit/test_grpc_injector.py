@@ -16,7 +16,7 @@ from hdwp.core.model.schemas import NormalizedRequest
 async def test_execute_success():
     from hdwp.core.experiment.grpc_injector import GrpcInjector
 
-    mock_channel = AsyncMock()
+    mock_channel = MagicMock()
     mock_channel.close = AsyncMock()
     mock_unary = AsyncMock(return_value={"user_id": "1", "name": "admin"})
     mock_channel.unary_unary.return_value = mock_unary
@@ -40,7 +40,7 @@ async def test_execute_success():
 async def test_execute_tls():
     from hdwp.core.experiment.grpc_injector import GrpcInjector
 
-    mock_channel = AsyncMock()
+    mock_channel = MagicMock()
     mock_channel.close = AsyncMock()
     mock_channel.unary_unary.return_value = AsyncMock(return_value={})
 
@@ -66,7 +66,7 @@ async def test_execute_tls():
 async def test_execute_permission_denied_maps_to_403():
     from hdwp.core.experiment.grpc_injector import GrpcInjector
 
-    mock_channel = AsyncMock()
+    mock_channel = MagicMock()
     mock_channel.close = AsyncMock()
 
     rpc_error = grpc.RpcError()
@@ -90,7 +90,7 @@ async def test_execute_permission_denied_maps_to_403():
 async def test_execute_not_found_maps_to_404():
     from hdwp.core.experiment.grpc_injector import GrpcInjector
 
-    mock_channel = AsyncMock()
+    mock_channel = MagicMock()
     mock_channel.close = AsyncMock()
 
     rpc_error = grpc.RpcError()
@@ -114,7 +114,7 @@ async def test_execute_not_found_maps_to_404():
 async def test_send_raw_parses_url():
     from hdwp.core.experiment.grpc_injector import GrpcInjector
 
-    mock_channel = AsyncMock()
+    mock_channel = MagicMock()
     mock_channel.close = AsyncMock()
     mock_channel.unary_unary.return_value = AsyncMock(return_value={})
 
@@ -138,7 +138,7 @@ async def test_send_raw_parses_url():
 async def test_execute_auth_metadata():
     from hdwp.core.experiment.grpc_injector import GrpcInjector
 
-    mock_channel = AsyncMock()
+    mock_channel = MagicMock()
     mock_channel.close = AsyncMock()
     mock_call = AsyncMock(return_value={})
     mock_channel.unary_unary.return_value = mock_call

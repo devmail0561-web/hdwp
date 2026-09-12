@@ -184,9 +184,15 @@ async def _seed_from_paths(
                 or bool(path_item.get("security"))
                 or (isinstance(operation, dict) and bool(operation.get("security")))
             )
-            body = _infer_response_body(operation) if isinstance(operation, dict) else None
+            resp_body = _infer_response_body(operation) if isinstance(operation, dict) else None
+            req_query_params, req_body = (
+                _extract_request_params(path_item, operation)
+                if isinstance(operation, dict)
+                else ({}, None)
+            )
             count += await _emit_synthetic_obs(
-                bus, context, url, method.upper(), roles, body, requires_auth,
+                bus, context, url, method.upper(), roles, resp_body, requires_auth,
+                req_query_params=req_query_params, req_body=req_body,
             )
 
     log.info("openapi_seeder.spec_done", endpoints=len(paths), observations=count)
@@ -222,6 +228,8 @@ async def _emit_synthetic_obs(
     roles: list,
     body: Any = None,
     requires_auth: bool = False,
+    req_query_params: dict[str, str] | None = None,
+    req_body: Any = None,
 ) -> int:
     """
     Émet une observation synthétique par rôle.
@@ -240,7 +248,9 @@ async def _emit_synthetic_obs(
             status = 200
             resp_body = body
 
-        norm_req = normalize_request(method=method, url=url)
+        norm_req = normalize_request(method=method, url=url, body=req_body)
+        if req_query_params:
+            norm_req = norm_req.model_copy(update={"query_params": req_query_params})
         norm_resp = normalize_response(status_code=status, headers={}, body=resp_body)
         obs = RawObservation(
             id=generate_id("OBS"),
@@ -276,6 +286,43 @@ async def _load_spec(spec_path: str) -> dict[str, Any] | None:
     except Exception as exc:  # noqa: BLE001
         log.warning("openapi_seeder.load_failed", path=spec_path, error=str(exc))
         return None
+
+
+def _extract_request_params(
+    path_item: dict[str, Any],
+    operation: dict[str, Any],
+) -> tuple[dict[str, str], Any]:
+    """Extrait query_params et req_body depuis un path_item + operation OpenAPI 3.0.
+
+    Operation-level parameters ont la priorité sur path_item-level (même in+name).
+    """
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for p in path_item.get("parameters", []):
+        if isinstance(p, dict) and p.get("in") and p.get("name"):
+            merged[(p["in"], p["name"])] = p
+    for p in operation.get("parameters", []):
+        if isinstance(p, dict) and p.get("in") and p.get("name"):
+            merged[(p["in"], p["name"])] = p
+
+    query_params: dict[str, str] = {}
+    for (loc, name), param in merged.items():
+        if loc == "query":
+            schema = param.get("schema", {})
+            type_name = schema.get("type", "string") if isinstance(schema, dict) else "string"
+            query_params[name] = str(_type_to_value(type_name))
+
+    req_body: Any = None
+    rb = operation.get("requestBody", {})
+    if isinstance(rb, dict):
+        content = rb.get("content", {})
+        json_schema = next(
+            (v.get("schema", {}) for k, v in content.items() if "json" in k or "form" in k),
+            None,
+        )
+        if json_schema:
+            req_body = _schema_to_example(json_schema)
+
+    return query_params, req_body
 
 
 def _infer_response_body(operation: dict[str, Any]) -> dict[str, Any] | None:

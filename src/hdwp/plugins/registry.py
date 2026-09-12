@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
-import inspect
 import sys
 
 import structlog
@@ -28,20 +27,22 @@ class PluginRegistry:
         self._discover_entry_points()
         self._discover_user_plugins()
         self._load_config()
+        self._wire_plugin_registries()
+
+    def _wire_plugin_registries(self) -> None:
+        """Appelle register_mutations() sur chaque plugin."""
+        from hdwp.core import mutation_registry as _mr
+
+        for plugin in self._plugins.values():
+            for spec in plugin.register_mutations():
+                try:
+                    _mr.register(**spec)
+                except Exception as exc:
+                    logger.warning("plugin.register_mutation_failed",
+                                   plugin_id=plugin.id, error=str(exc))
 
     def _instantiate_plugin(self, plugin_class: type) -> HDWPPlugin:
-        """Instantiate plugin with PayloadDatabase injection if signature accepts it.
-
-        Phase 0.1: Backward-compatible plugin instantiation using signature inspection.
-        """
-        from hdwp.store.payload_database import get_payload_database
-
-        sig = inspect.signature(plugin_class.__init__)
-        if 'payload_db' in sig.parameters:
-            payload_db = get_payload_database()
-            return plugin_class(payload_db=payload_db)
-        else:
-            return plugin_class()  # Backward compat for plugins without payload_db
+        return plugin_class()
 
     def _config_path(self):  # type: ignore[return]
         from hdwp.core.paths import HDWP_HOME
@@ -72,7 +73,6 @@ class PluginRegistry:
             for ep in eps:
                 try:
                     plugin_class = ep.load()
-                    # Phase 0.1: Inject PayloadDatabase if plugin accepts it
                     plugin = self._instantiate_plugin(plugin_class)
                     self._plugins[plugin.id] = plugin
                     self._sources[plugin.id] = "builtin"
@@ -111,7 +111,6 @@ class PluginRegistry:
                     plugin_class = getattr(module, "PLUGIN_CLASS", None)
                     if plugin_class is None:
                         continue
-                    # Phase 0.1: Inject PayloadDatabase if plugin accepts it
                     plugin = self._instantiate_plugin(plugin_class)
                     self._plugins[plugin.id] = plugin
                     self._sources[plugin.id] = "user"

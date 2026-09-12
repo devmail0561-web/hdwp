@@ -107,8 +107,9 @@ class ObservationEngine:
             except Exception as exc:
                 log.debug("grpc_observer.skipped", reason=str(exc))
 
-        # SPA crawl via Playwright — only when proxy is active (port known)
-        # Routes browser traffic through the HDWP MITM proxy automatically
+        # SPA crawl via Playwright :
+        # - Mode proxy : Playwright route via le MITM (comportement existant)
+        # - Mode autonome : déclenché si peu d'endpoints HTML trouvés (probable SPA)
         if self._proxy_url:
             try:
                 from urllib.parse import urlparse as _urlparse
@@ -122,7 +123,15 @@ class ObservationEngine:
                 )
                 await spa.crawl(self._context.base_url)
             except Exception as exc:
-                log.debug("spa_crawler.skipped", reason=str(exc))
+                log.debug("spa_crawler.proxy_mode_skipped", reason=str(exc))
+        elif self._model_accessor is not None and len(self._model_accessor().endpoints) < 5:
+            try:
+                from hdwp.core.observation.spa_crawler import SPACrawler
+                spa = SPACrawler(bus=self._bus, session_id=self._context.session_id)
+                await spa.crawl(self._context.base_url)
+                log.info("spa_crawler.autonomous_done")
+            except Exception as exc:
+                log.debug("spa_crawler.autonomous_skipped", reason=str(exc))
 
         self._running = False
         log.info("observation_engine.done")

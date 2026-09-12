@@ -22,8 +22,8 @@ export const useFindingsStore = create<FindingsStore>((set) => ({
       const r = await fetch('/api/findings')
       const data = await r.json()
       set({ findings: data })
-    } catch {
-      // ignore
+    } catch (e) {
+      console.error('fetchFindings failed', e)
     } finally {
       set({ loading: false })
     }

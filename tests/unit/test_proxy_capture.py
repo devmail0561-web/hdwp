@@ -35,17 +35,6 @@ def test_proxy_capture_instantiates_without_mitmproxy():
     assert capture.address == "127.0.0.1:8888"
 
 
-@pytest.mark.asyncio
-async def test_proxy_capture_start_raises_if_no_mitmproxy():
-    """ProxyCapture.start() raises RuntimeError when mitmproxy is absent."""
-    if _MITMPROXY_AVAILABLE:
-        pytest.skip("mitmproxy is installed — skip absence test")
-    ctx = _make_context()
-    bus = AsyncEventBus()
-    scope_guard = ScopeGuard(ctx)
-    capture = ProxyCapture(bus, scope_guard, "session-1")
-    with pytest.raises(RuntimeError, match="mitmproxy"):
-        await capture.start()
 
 
 def test_obs_to_symbol_200():
