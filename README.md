@@ -16,7 +16,7 @@
 
 [![Plugins](https://img.shields.io/badge/Plugins-38_semantic-8b5cf6?style=flat-square)]()
 [![Mutations](https://img.shields.io/badge/Mutations-31_types-06b6d4?style=flat-square)]()
-[![Tests](https://img.shields.io/badge/Tests-1260_passing-22c55e?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-1309_passing-22c55e?style=flat-square)]()
 [![Release](https://img.shields.io/github/v/release/devmail0561-web/hdwp?include_prereleases&style=flat-square&color=f97316)](https://github.com/devmail0561-web/hdwp/releases/latest)
 [![Binary](https://img.shields.io/badge/Binary-standalone-1d4ed8?style=flat-square)](https://github.com/devmail0561-web/hdwp/releases/latest)
 
@@ -83,29 +83,29 @@ The result: HDWP detects **unknown vulnerability classes** through behavioral an
 | Semantic application model | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Property-based hypothesis engine | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Unknown anomaly detection (no signatures) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Multi-role behavioral diff (BOLA/AuthZ) | ✅ | Partial | ❌ | ❌ | ❌ |
+| Multi-role behavioral diff (BOLA/AuthZ) | ✅ | Partial | Partial | ❌ | ❌ |
 | ML confidence scoring with explainability | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Cross-session ML learning (persistent KB) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Thompson Sampling mutation prioritization | ✅ | ❌ | ❌ | ❌ | ❌ |
 | A\* multi-step attack chain planning | ✅ | ❌ | ❌ | ❌ | ❌ |
-| CVE scanning via OSV.dev (JS + backend) | ✅ | ❌ | Partial | Partial | ✅ |
+| CVE scanning (JS + backend) | ✅ | Partial | Partial | Partial | ✅ |
 | MITM proxy + SPA browser crawl | ✅ | ✅ | ✅ | ❌ | ❌ |
 | JS dynamic API extraction (fetch/axios/XHR) | ✅ | Partial | Partial | ❌ | ❌ |
-| WebSocket + gRPC protocol coverage | ✅ | Partial | ❌ | ❌ | ❌ |
+| WebSocket + gRPC protocol coverage | ✅ | Partial | Partial | ❌ | Partial |
 | Fully open-source | ✅ | ❌ | ✅ | ✅ | ✅ |
 
 **Key differentiators:**
-- **Burp Suite Pro** is a powerful manual proxy with an active scanner. It requires a browser, a license, and significant manual effort. It has no semantic model and cannot plan multi-step attack chains.
-- **OWASP ZAP** is a good free alternative to Burp but relies on signature-based scanning. Its automation framework requires scripting effort to customize.
+- **Burp Suite Pro** is a powerful manual proxy with an active scanner and its own CVE database. It requires a browser, a license, and significant manual effort. It has no semantic model and cannot plan multi-step attack chains.
+- **OWASP ZAP** is a good free alternative to Burp with WebSocket support and an Access Control Testing add-on for multi-role AuthZ. Its scanner relies on signature-based detection and its automation framework requires scripting effort to customize.
 - **Nikto** is a fast but shallow banner/header/path scanner with no semantic understanding.
-- **Nuclei** has a large template library but templates are static signatures, not behavioral hypotheses. No application model, no cross-role diff, no ML.
+- **Nuclei** has a large template library (including WebSocket protocol support since v2.8) but templates are static signatures, not behavioral hypotheses. No application model, no cross-role diff, no ML.
 - **HDWP** is the only tool in this list that builds a semantic graph of the application, derives security properties from it, uses behavioral comparison to detect violations, and improves across sessions through machine learning.
 
 ---
 
 ## ML Pipeline
 
-HDWP embeds 8 ML models coordinated by a unified `MetaLearner` facade. All models persist their state in a cross-session `KnowledgeBase` (SQLite). They learn from every scan and improve over time.
+HDWP embeds 9 ML components coordinated by a unified `MetaLearner` facade. All models persist their state in a cross-session `KnowledgeBase` (SQLite). They learn from every scan and improve over time.
 
 ### ConfidenceModelV2
 
@@ -120,9 +120,9 @@ A **10-dimensional logistic regression** that produces the final `[0,1]` confide
 | `experiment_coverage` | Breadth of parameter locations and mutation variants tested |
 | `temporal_signal` | Timing anomaly escalation level (blind injection detection) |
 | `crossrole_signal` | Cross-role differential confidence |
-| `invariant_signal` | Whether a learned invariant was violated |
-| `waf_signal` | WAF bypass success indicator |
-| `ml_oracle_boost` | `OracleModel` logistic regression score |
+| `invariant_violated` | Whether a learned invariant was violated |
+| `waf_bypass_success` | WAF bypass success indicator |
+| `causal_depth` | Causal reasoning depth (replay confirmation chains) |
 
 Weights are updated cross-session by `FeedbackLoop` from confirmed vs. false-positive findings.
 
@@ -149,7 +149,7 @@ A **Thompson Sampling contextual bandit** with arms keyed by `(endpoint_fingerpr
 
 ### HypothesisBandit
 
-A **UCB1 (Upper Confidence Bound) bandit** with arms keyed by `(property_type, mutation_type)`.
+A **Thompson Sampling bandit** with arms keyed by `(property_type, mutation_type)`, using `Beta(alpha, beta)` posteriors.
 
 Complements `PayloadOptimizer`: while `PayloadOptimizer` optimizes by endpoint profile, `HypothesisBandit` optimizes by abstract property × mutation type — a higher-level signal that generalizes across endpoint types.
 
@@ -159,7 +159,7 @@ An **active learning component** that identifies the hypotheses where the model 
 
 ### ExplainabilityLayer
 
-Attached to each confirmed finding, the `ExplainabilityLayer` produces a **per-dimension contribution breakdown**:
+Built into `ConfidenceModelV2.explain()`, the explainability layer produces a **per-dimension contribution breakdown** for each confirmed finding:
 
 ```json
 {
@@ -167,9 +167,9 @@ Attached to each confirmed finding, the `ExplainabilityLayer` produces a **per-d
   "reproducibility":        { "score": 0.88, "contribution": "HIGH" },
   "temporal_signal":        { "score": 0.00, "contribution": "NONE" },
   "crossrole_signal":       { "score": 0.75, "contribution": "MEDIUM" },
-  "ml_oracle_boost":        { "score": 0.82, "contribution": "HIGH" },
+  "causal_depth":           { "score": 0.82, "contribution": "HIGH" },
   "overall":                0.87,
-  "top_contributors":       ["oracle_strength", "ml_oracle_boost", "reproducibility"]
+  "top_contributors":       ["oracle_strength", "causal_depth", "reproducibility"]
 }
 ```
 
@@ -177,14 +177,14 @@ Displayed in the FINDINGS tab and included in JSON/Markdown reports.
 
 ### MetaLearner (facade)
 
-Orchestrates all 8 models. Exposes a single API to `engine.py`:
+Orchestrates all ML components. Exposes a single API to `engine.py`:
 
 | Method | What it does |
 |---|---|
 | `await load(kb)` | Loads all models from `KnowledgeBase` at session start |
 | `wire(bus, oracle)` | Subscribes to bus events to feed the feedback loop |
 | `sort_hypotheses(hypotheses)` | Reorders the hypothesis queue using `HypothesisBandit` + `PayloadOptimizer` + `ActiveLearner` |
-| `await persist(kb)` | Saves updated model weights to `KnowledgeBase` at session end |
+| `await save_session(kb, target_hash, target_type)` | Saves updated model weights to `KnowledgeBase` at session end |
 | `stats()` | Returns a snapshot of all model states for the `/api/state` endpoint |
 
 ---
@@ -233,7 +233,7 @@ HDWP performs deep multi-source discovery. It leaves nothing unexamined.
 - Passive proxy capture mode (mitmproxy) — records real user browser traffic as an additional seed
 
 **Protocol coverage**
-- **WebSocket** — `ws://` and `wss://` endpoints observed and injected via `WsObserver` + `WsInjector`
+- **WebSocket** — `ws://` and `wss://` endpoints observed and injected via `WebSocketObserver` + `WebSocketInjector`
 - **gRPC** — `GrpcObserver` enumerates services via server reflection; `GrpcInjector` injects mutations into unary calls
 
 ### Version fingerprinting and CVE scanning
@@ -268,14 +268,16 @@ Offline mode supported — query a local JSON database instead of the live OSV.d
 - **Field entropy analysis** — detects randomness changes in fields that should be stable
 - **CrossRole diff** (`STRUCTURAL` / `VALUE` / `IDENTITY`) — compares the same request across different authenticated roles to detect BOLA and AuthZ issues
 
-### ML intelligence (8 models)
-- **ConfidenceModelV2** — 10-dimensional logistic model; produces the final `[0,1]` confidence score per finding
+### ML intelligence (9 components)
+- **ConfidenceModelV2** — 10-dimensional logistic model; produces the final `[0,1]` confidence score per finding, with built-in explainability (`explain()`)
 - **OracleModel** — scikit-learn classifier trained on confirmed vs. false-positive verdicts
 - **VulnClassifier** — per-endpoint vulnerability type prediction to focus the hypothesis queue
 - **PayloadOptimizer** — Thompson Sampling bandit over `(endpoint_fingerprint × mutation_type)`
-- **HypothesisBandit** — UCB1 bandit over `(property_type × mutation_type)`
+- **HypothesisBandit** — Thompson Sampling bandit over `(property_type × mutation_type)`
 - **ActiveLearner** — promotes uncertain hypotheses to maximize training signal
-- **ExplainabilityLayer** — per-finding breakdown of which dimensions drove the confidence verdict
+- **SimilarityIndex** — cross-endpoint similarity for transfer learning
+- **EndpointClusterer** — endpoint grouping for vulnerability type prediction
+- **FeedbackLoop** — updates ConfidenceModelV2 weights from confirmed vs. false-positive findings
 - **MetaLearner** — unified facade; all models persist cross-session in `KnowledgeBase` (SQLite)
 
 ### Detection intelligence
@@ -618,7 +620,7 @@ OBSERVE     → BFS crawl (HTML, forms, JS fetch/axios/XHR/WebSocket, HATEOAS JS
               + OPTIONS probing per path
               + POST/PUT/PATCH probing per GET endpoint
               + SPA browser crawl (Playwright via MITM proxy)
-              + WsObserver (WebSocket endpoint discovery + traffic capture)
+              + WebSocketObserver (WebSocket endpoint discovery + traffic capture)
               + GrpcObserver (service reflection + method enumeration)
               + Version fingerprinting → OSV.dev CVE lookup (JS + 9 backend frameworks)
 
@@ -631,14 +633,14 @@ INFER       → 38 SecurityProperty derivations from the semantic graph
 
 PRIORITIZE  → MetaLearner.sort_hypotheses()
               PayloadOptimizer (Thompson Sampling: fingerprint × mutation_type)
-              HypothesisBandit (UCB1: property_type × mutation_type)
+              HypothesisBandit (Thompson Sampling: property_type × mutation_type)
               ActiveLearner (promotes uncertain hypotheses)
               VulnClassifier (per-endpoint mutation focus)
 
 EXPERIMENT  → baseline request + 31 mutation types
               + Encoding pipeline (URL, Unicode, Base64, null bytes, …)
               + BypassRegistry (15 transport/protocol bypass strategies, 7 WAF signatures)
-              + WsInjector / GrpcInjector for non-HTTP protocols
+              + WebSocketInjector / GrpcInjector for non-HTTP protocols
 
 ORACLE      → SemanticDiff (data_identity_score, structural diff, value diff)
               + Z-score anomaly, size ratio, field entropy
@@ -647,11 +649,11 @@ ORACLE      → SemanticDiff (data_identity_score, structural diff, value diff)
               + InjectionOracle (XSS reflection, SSTI evaluation, SQLi pattern)
               + ConfidenceModelV2 (10 dimensions)
               + OracleModel (scikit-learn classifier)
-              + ExplainabilityLayer (per-finding contribution breakdown)
+              + ConfidenceModelV2.explain() (per-finding contribution breakdown)
               → Finding (CONFIRMED / REFUTED / AMBIGUOUS → AmbiguityResolver)
 
 LEARN       → FeedbackLoop updates ConfidenceModelV2 weights
-              MetaLearner.persist() saves all model states to KnowledgeBase
+              MetaLearner.save_session() saves all model states to KnowledgeBase
 
 CHAIN       → AttackGraphPlanner (A* multi-step on AttackState)
               goals: ACCOUNT_TAKEOVER, DATA_EXFILTRATION, PRIVILEGE_ESCALATION
